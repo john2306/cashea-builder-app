@@ -6,7 +6,7 @@
 #     cp .env.prod.example .env.prod && nano .env.prod   # completá tus valores
 #     chmod +x deploy.sh && ./deploy.sh
 #
-#   Actualizar (re-deploy): ./deploy.sh   (hace git pull + rebuild + up)
+#   Actualizar (re-deploy): ./deploy.sh   (rebuild + up con el código ya presente)
 #
 # Instala Docker + plugin compose si faltan. Idempotente: seguro de re-correr.
 set -euo pipefail
@@ -53,13 +53,7 @@ if grep -qE '^(DO_AUTH_TOKEN=dop_v1_xxx|SESSION_SECRET=cambia|POSTGRES_PASSWORD=
   exit 1
 fi
 
-# 4) Últimos cambios (si es un clon git)
-if [ -d .git ]; then
-  log "git pull…"
-  git pull --ff-only || err "git pull falló (continúo con el código local)."
-fi
-
-# 5) Build + up
+# Build + up
 log "Construyendo y levantando el stack (puede tardar la primera vez)…"
 $SUDO docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build
 
