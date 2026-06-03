@@ -24,7 +24,20 @@ export function DeployDialog({
   const [error, setError] = useState("");
   const [deploying, setDeploying] = useState(false);
   const [rebuild, setRebuild] = useState(false);
+  // Dominio/esquema de las apps: lo trae el backend (prod: .app.izideploy.com https; dev: .localhost:5173 http).
+  const [suffix, setSuffix] = useState(".localhost:5173");
+  const [scheme, setScheme] = useState("http");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    fetch("/api/config")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.apps?.suffix) setSuffix(d.apps.suffix);
+        if (d?.apps?.scheme) setScheme(d.apps.scheme);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -103,13 +116,13 @@ export function DeployDialog({
               autoFocus
               spellCheck={false}
             />
-            <span className="deploy-domain">.localhost:5173</span>
+            <span className="deploy-domain">{suffix}</span>
           </div>
           <p className={`deploy-hint ${error ? "taken" : avail}`}>
             {error || hint[avail]}
           </p>
           {normalized && !error && (
-            <p className="deploy-url">http://{normalized}.localhost:5173</p>
+            <p className="deploy-url">{scheme}://{normalized}{suffix}</p>
           )}
         </div>
 

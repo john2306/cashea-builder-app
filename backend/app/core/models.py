@@ -100,6 +100,9 @@ class AppProject(Base):
     app_spec: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     # Enterprise: lista de correos con acceso a la app desplegada (allowlist dinámica).
     shared_emails: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Correo del creador/dueño de la app. Se auto-comparte al crear y NO se puede quitar
+    # del acceso (siempre conserva acceso, aunque se editen los demás compartidos).
+    owner_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Código generado (cache): {spec_hash, main_py, static_files, backend_reqs}.
     # Si la spec no cambió, "Actualizar" reusa esto y saltea la generación LLM.
     build_artifacts: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)

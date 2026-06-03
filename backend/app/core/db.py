@@ -67,6 +67,9 @@ async def init_db() -> None:
             text("ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS shared_emails JSON")
         )
         await conn.execute(
+            text("ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS owner_email VARCHAR(255)")
+        )
+        await conn.execute(
             text("ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS build_artifacts JSON")
         )
         await conn.execute(

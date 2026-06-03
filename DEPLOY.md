@@ -112,6 +112,13 @@ En **Notion** (integración pública), redirect URI:
 - **Certs no emiten** (y el provider docker SÍ funciona): revisá `DO_AUTH_TOKEN` (scope Write),
   que `izideploy.com` sea autoritativo en DO (`dig NS izideploy.com +short` → `ns*.digitalocean.com`)
   y que `*.app` y `@` resuelvan a la IP (`dig izideploy.com`, `dig foo.app.izideploy.com`).
+- **El apex emite pero el wildcard `*.app` falla con `propagation: time limit exceeded`**: el
+  wildcard crea DOS TXT en `_acme-challenge.app` y DO tarda en servirlos en sus 3 NS más que el
+  timeout por defecto de lego (~60s). Ya está mitigado con `DO_PROPAGATION_TIMEOUT=600` /
+  `DO_POLLING_INTERVAL=20` en el servicio `traefik` del compose. IMPORTANTE: que NO exista una
+  zona `app.izideploy.com` aparte en DO → todos los records (`@`, `*.app`) viven en la única zona
+  `izideploy.com`. Confirmá que el TXT se crea con:
+  `curl -s -H "Authorization: Bearer $DO_AUTH_TOKEN" "https://api.digitalocean.com/v2/domains/izideploy.com/records?type=TXT"`.
 - **Build de apps falla por DNS (pip/npm)** dentro de Docker: en el Droplet suele andar; si no,
   exportá `DOCKER_BUILDKIT=0` antes del `up`.
 - **Seguridad**: la plataforma ejecuta código generado en contenedores en el mismo host

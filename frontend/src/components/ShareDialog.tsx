@@ -12,6 +12,7 @@ export function ShareDialog({
   onClose: () => void;
 }) {
   const [emails, setEmails] = useState<string[]>([]);
+  const [owner, setOwner] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -19,8 +20,11 @@ export function ShareDialog({
 
   useEffect(() => {
     fetch(`/api/apps/${appId}/shares`)
-      .then((r) => (r.ok ? r.json() : { emails: [] }))
-      .then((d) => setEmails(d.emails ?? []))
+      .then((r) => (r.ok ? r.json() : { emails: [], owner: null }))
+      .then((d) => {
+        setOwner(d.owner ?? null);
+        setEmails(d.emails ?? []);
+      })
       .finally(() => setLoaded(true));
   }, [appId]);
 
@@ -94,20 +98,29 @@ export function ShareDialog({
           ) : emails.length === 0 ? (
             <p className="muted-note">Nadie tiene acceso todavía. Agregá correos.</p>
           ) : (
-            emails.map((e) => (
-              <span className="share-chip" key={e}>
-                {e}
-                <button
-                  className="share-chip-x"
-                  type="button"
-                  aria-label={`Quitar ${e}`}
-                  title="Quitar acceso"
-                  onClick={() => setEmails((prev) => prev.filter((x) => x !== e))}
-                >
-                  ×
-                </button>
-              </span>
-            ))
+            emails.map((e) =>
+              e === owner ? (
+                <span className="share-chip share-chip-owner" key={e}>
+                  {e}
+                  <span className="share-owner-badge" title="Dueño de la app · acceso permanente">
+                    Propietario
+                  </span>
+                </span>
+              ) : (
+                <span className="share-chip" key={e}>
+                  {e}
+                  <button
+                    className="share-chip-x"
+                    type="button"
+                    aria-label={`Quitar ${e}`}
+                    title="Quitar acceso"
+                    onClick={() => setEmails((prev) => prev.filter((x) => x !== e))}
+                  >
+                    ×
+                  </button>
+                </span>
+              ),
+            )
           )}
         </div>
 

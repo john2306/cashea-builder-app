@@ -28,7 +28,7 @@ from .connectors import PROVIDERS, build_authorize_url, detect_providers, is_con
 from .core.crypto import decrypt, encrypt
 from .core.db import SessionLocal, get_session, init_db
 from .core.events import log_event
-from .builder.deploy import build_and_run, teardown_app
+from .builder.deploy import build_and_run, public_url_parts, teardown_app
 from .core.models import (
     AppProject,
     Connection,
@@ -97,7 +97,7 @@ def _is_public_api(path: str) -> bool:
     """Rutas /api que NO exigen sesión del builder:
     - gateway de apps desplegadas (X-App-Secret) y datos de dashboard del visor;
     - flujos OAuth (navegación/popup y callbacks, que no pueden llevar el header de sesión)."""
-    if path == "/api/health":
+    if path == "/api/health" or path == "/api/config":
         return True
     if "/access" in path or "/owner-token/" in path or path.startswith("/api/dashboards/"):
         return True
@@ -233,6 +233,13 @@ async def list_apps(session: AsyncSession = Depends(get_session)):
     return rows
 
 
+@app.get("/api/config")
+async def public_config():
+    """Config que la UI necesita en runtime. Hoy: dominio/esquema de las apps desplegadas
+    (para que el modal de deploy muestre `.app.izideploy.com` en prod y no el localhost)."""
+    return {"apps": public_url_parts()}
+
+
 @app.post("/api/apps", response_model=AppProjectDetail)
 async def create_app(
     payload: AppProjectCreate,
@@ -244,9 +251,13 @@ async def create_app(
     session.add(conversation)
     await session.flush()
 
+    # El creador es el dueño: se auto-comparte la app con su correo y no se podrá quitar.
+    owner = (_req_email(request) or "").strip().lower() or None
     app_project = AppProject(
         conversation_id=conversation.id,
         title=title[:255],
+        owner_email=owner,
+        shared_emails=[owner] if owner else [],
     )
     session.add(app_project)
     await session.flush()
@@ -432,6 +443,18 @@ async def deploy_app(
         except Exception:  # noqa: BLE001
             pass
 
+    # Garantía de owner: si la app no tenía dueño (legacy) o aún no se auto-compartió,
+    # el que despliega queda como dueño y con acceso permanente.
+    email = _req_email(request)
+    deployer = (email or "").strip().lower() or None
+    if deployer:
+        if not app_project.owner_email:
+            app_project.owner_email = deployer
+        shared = list(app_project.shared_emails or [])
+        owner = (app_project.owner_email or "").strip().lower()
+        if owner and owner not in shared:
+            app_project.shared_emails = sorted({*shared, owner})
+
     app_project.deploy_state = "deploying"
     app_project.deploy_stage = "Iniciando…"
     await session.commit()
@@ -441,7 +464,6 @@ async def deploy_app(
     from .tasks.jobs import run_deploy_task
 
     force_full = bool((payload or {}).get("rebuild"))
-    email = _req_email(request)
     await log_event(
         "deploy.start", status="info", user_email=email, app_id=app_project.id,
         message=f"Despliegue iniciado ({app_project.slug})"
@@ -606,7 +628,11 @@ async def get_shares(app_id: str, session: AsyncSession = Depends(get_session)):
     ap = await session.get(AppProject, app_id)
     if ap is None:
         raise HTTPException(status_code=404, detail="App no encontrada")
-    return {"emails": ap.shared_emails or []}
+    owner = (ap.owner_email or "").strip().lower() or None
+    others = sorted(e for e in (ap.shared_emails or []) if e != owner)
+    # El dueño siempre figura y va primero; `owner` viaja aparte para marcarlo no-eliminable.
+    emails = ([owner] if owner else []) + others
+    return {"emails": emails, "owner": owner}
 
 
 @app.put("/api/apps/{app_id}/shares")
@@ -616,10 +642,14 @@ async def set_shares(
     ap = await session.get(AppProject, app_id)
     if ap is None:
         raise HTTPException(status_code=404, detail="App no encontrada")
-    emails = [e.strip().lower() for e in (body.get("emails") or []) if e and e.strip()]
-    ap.shared_emails = sorted(set(emails))
+    emails = {e.strip().lower() for e in (body.get("emails") or []) if e and e.strip()}
+    # El dueño NO se puede quitar: se reinyecta siempre (defensa en backend, no solo en UI).
+    owner = (ap.owner_email or "").strip().lower() or None
+    if owner:
+        emails.add(owner)
+    ap.shared_emails = sorted(emails)
     await session.commit()
-    return {"emails": ap.shared_emails}
+    return {"emails": ap.shared_emails, "owner": owner}
 
 
 @app.get("/api/apps/{app_id}/access")
@@ -630,7 +660,12 @@ async def app_access(
     """La app desplegada chequea acá (en runtime) si un correo tiene acceso (allowlist)."""
     _require_app_secret(app_id, x_app_secret)
     ap = await session.get(AppProject, app_id)
-    allowed = bool(ap and ap.shared_emails and email.strip().lower() in ap.shared_emails)
+    if ap is None:
+        return {"allowed": False}
+    e = email.strip().lower()
+    owner = (ap.owner_email or "").strip().lower()
+    # El dueño siempre tiene acceso; el resto, si está en la allowlist.
+    allowed = bool(e and (e == owner or e in (ap.shared_emails or [])))
     return {"allowed": allowed}
 
 

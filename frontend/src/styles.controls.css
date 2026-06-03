@@ -2881,6 +2881,22 @@ button {
 .share-chip-x:hover {
   color: var(--err, #d94343);
 }
+/* Dueño de la app: chip con acento amarillo y badge, sin botón de quitar. */
+.share-chip-owner {
+  padding-right: 8px;
+  background: var(--brand-soft, #fff6d6);
+  border-color: var(--brand, #ffd200);
+}
+.share-owner-badge {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7a5c00;
+  background: var(--brand, #ffd200);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
 
 /* Modal Versiones (historial git + rollback) */
 .versions-modal {

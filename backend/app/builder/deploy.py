@@ -58,6 +58,18 @@ def _traefik_labels(slug: str, host: str) -> dict[str, str]:
         labels[f"traefik.http.routers.{slug}.tls.domains[0].sans"] = f"*.{APP_DOMAIN}"
     return labels
 
+
+def public_url_parts() -> dict[str, str]:
+    """Esquema y sufijo del dominio de las apps desplegadas (misma lógica que el deploy real).
+    Lo usa el modal de la UI para mostrar el dominio correcto: en prod `.app.izideploy.com`
+    (https, sin puerto) y en dev `.localhost:5173` (http)."""
+    https = bool(APP_CERTRESOLVER)
+    return {
+        "scheme": "https" if https else "http",
+        "domain": APP_DOMAIN,
+        "suffix": f".{APP_DOMAIN}" if https else f".{APP_DOMAIN}:{APP_DOMAIN_PORT}",
+    }
+
 # ---------- Imagen BASE (se construye una vez, compartida por todas las apps) ----------
 # Trae las deps comunes pre-instaladas; cada app instala SOLO su delta (requirements.txt).
 API_BASE_TAG = "cashea-app-api-base:latest"
