@@ -106,7 +106,7 @@ npm install
 npm run dev
 ```
 
-Abrí <http://localhost:5180>. Vite hace proxy de `/api`, `/auth` y `/ws` al backend. Iniciá
+Abrí <http://localhost:5180>. Vite hace proxy de `/api` y `/auth` al backend. Iniciá
 sesión con Google.
 
 ### 3) Apps desplegadas
@@ -122,7 +122,6 @@ allowlist de correos (botón **Compartir**); login con Google.
 backend/app/
   main.py            # API HTTP: apps, deploy, auth gateway (Google SSO), owner-token,
                      #   proxy LLM, connector proxy (MCP), logs, run desacoplado (SSE)
-  ws.py              # WebSocket legacy (el builder usa SSE)
   auth.py            # JWT de sesión (HS256)
   core/              # config, db (async), crypto (Fernet), models, schemas, events (bitácora)
   agent/             # runner (loop Claude + streaming), prompts, tools, run_service (SSE+Redis),

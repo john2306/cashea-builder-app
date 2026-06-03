@@ -1,7 +1,7 @@
 """Loop agéntico manual con streaming.
 
 Ejecuta el bucle tool-use de Claude, transmite tokens y eventos al cliente mediante
-un callback `emit` (que en producción escribe en el WebSocket), y coordina las
+un callback `emit` (que publica los eventos a un Redis Stream para el SSE), y coordina las
 herramientas largas con los workers de Celery a través de Redis pub/sub.
 
 Decisiones tomadas de la guía del SDK:

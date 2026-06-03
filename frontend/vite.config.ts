@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// El proxy reenvía /api y /ws al backend de FastAPI en desarrollo,
+// El proxy reenvía /api y /auth al backend de FastAPI en desarrollo,
 // así el frontend usa rutas relativas y no hay problemas de CORS.
 export default defineConfig({
   plugins: [react()],
@@ -11,7 +11,6 @@ export default defineConfig({
     proxy: {
       "/api": { target: "http://localhost:8000", changeOrigin: true },
       "/auth": { target: "http://localhost:8000", changeOrigin: true },
-      "/ws": { target: "ws://localhost:8000", ws: true },
     },
   },
 });

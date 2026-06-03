@@ -1,7 +1,7 @@
 """Tareas largas ejecutadas por los workers de Celery.
 
 Cada tarea publica su progreso en un canal de Redis (pub/sub). El proceso de FastAPI
-está suscrito a ese canal y reenvía los eventos al navegador por WebSocket en tiempo real.
+está suscrito a ese canal y reenvía los eventos al navegador por SSE en tiempo real.
 
 El `channel` lo genera quien dispara la tarea (el runner del agente), de modo que el
 suscriptor ya está escuchando antes de que el worker empiece a publicar (sin race condition).

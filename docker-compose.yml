@@ -27,7 +27,7 @@ services:
 
   backend:
     build: ./backend
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --ws-max-size 33554432
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     env_file:
       - .env  # aporta ANTHROPIC_API_KEY
     environment:

@@ -48,7 +48,6 @@ from .core.schemas import (
     ConversationOut,
     MessageOut,
 )
-from .ws import router as ws_router
 
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
 # Estados OAuth pendientes: state -> (app_id, user_sub, provider, created_ts)
@@ -136,9 +135,6 @@ async def _require_session(request, call_next):
         return JSONResponse(status_code=401, content={"detail": "Sesión requerida"})
     request.state.user = user
     return await call_next(request)
-
-
-app.include_router(ws_router)
 
 
 SLUG_MAX = 21  # límite de caracteres del subdominio
