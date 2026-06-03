@@ -1,0 +1,11 @@
+# NO copiar node_modules del host (binarios de Windows rompen el build en Alpine → exit 126).
+# El `npm ci` dentro de la imagen instala las deps correctas para Linux.
+node_modules
+dist
+build
+.vite
+*.local
+npm-debug.log*
+yarn-error.log*
+Dockerfile
+.dockerignore
