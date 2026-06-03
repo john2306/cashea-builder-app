@@ -1,0 +1,112 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: automation
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --ws-max-size 33554432
+    env_file:
+      - .env  # aporta ANTHROPIC_API_KEY
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/automation
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CORS_ORIGINS: http://localhost:5180,http://127.0.0.1:5180
+      # Despliegue de apps (Traefik + docker-py)
+      TRAEFIK_NETWORK: cashea-web
+      APP_DOMAIN_PORT: "5173"
+      # Gateway de login (Google SSO) — GOOGLE_CLIENT_ID/SECRET vienen de .env
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-insecure-session-secret-change-me}
+      APPS_DATA_DIR: /data/apps  # repos git por app (trazabilidad/rollback)
+    # Monta el código (--reload), el socket de Docker (para desplegar apps) y los repos git.
+    volumes:
+      - ./backend/app:/app/app
+      - /var/run/docker.sock:/var/run/docker.sock
+      - appsdata:/data/apps
+    ports:
+      - "8000:8000"
+    networks:
+      - default
+      - web
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    command: celery -A app.tasks.celery_app.celery_app worker --loglevel=info
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/automation
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      # El worker ejecuta el pipeline de deploy -> necesita el mismo entorno que el backend.
+      TRAEFIK_NETWORK: cashea-web
+      APP_DOMAIN_PORT: "5173"
+      INTERNAL_GATEWAY: http://backend:8000
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-insecure-session-secret-change-me}
+      APPS_DATA_DIR: /data/apps  # repos git por app (commit por deploy)
+    volumes:
+      - ./backend/app:/app/app
+      - /var/run/docker.sock:/var/run/docker.sock  # para construir/correr las apps
+      - appsdata:/data/apps
+    networks:
+      - default
+      - web
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Reverse proxy: enruta cada app desplegada a su subdominio <slug>.localhost:5173
+  traefik:
+    image: traefik:latest
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:5173"
+    ports:
+      - "5173:5173"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - web
+
+volumes:
+  pgdata:
+  appsdata:  # repos git locales por app (trazabilidad de cambios + rollback)
+
+networks:
+  # Red compartida entre Traefik y los contenedores de las apps desplegadas.
+  web:
+    name: cashea-web
+  default: {}

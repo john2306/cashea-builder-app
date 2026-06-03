@@ -1,0 +1,137 @@
+# ============================================================================
+# Catálogo de MCP servers — ÚNICA FUENTE DE VERDAD.
+# Agregar un server (hasta cientos) = un bloque aquí. Cero cambios de código.
+#
+# Tras editar este archivo:
+#   1) docker exec cashea-builder-app-backend-1 python -m app.mcp.gen > docker-compose.mcp.yml
+#   2) docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d
+#   (el backend recarga el catálogo solo con --reload)
+#
+# Campos:
+#   key        identificador único (snake_case). Deriva el host interno mcp-<key con - >.
+#   label      nombre visible.
+#   brand      color de marca (hex) para la UI.
+#   transport  hosted      -> URL pública (Anthropic la alcanza). Va al CONECTOR DEL AGENTE.
+#              self_hosted -> contenedor local (supergateway envolviendo un server stdio).
+#                             Solo alcanzable por el ENGINE determinístico (DNS interno).
+#   auth       oauth -> OAuth 2.1 DCR+PKCE (botón Conectar, token por usuario).
+#              env   -> el contenedor trae sus credenciales por variables de entorno.
+#              none
+#   url        (hosted) URL del MCP.
+#   token_env  (hosted) variable de entorno con token pegado a mano (fallback).
+#   package    (self_hosted) paquete npm del server stdio que envuelve supergateway.
+#   command    (self_hosted, opcional) comando stdio completo; sobreescribe `package`.
+#   port       (self_hosted) puerto HTTP interno expuesto por el gateway. Default 8000.
+#   env        (self_hosted) variables de entorno que necesita el server (se pasan del .env).
+# ============================================================================
+servers:
+  - key: notion
+    label: Notion
+    brand: "#191919"
+    transport: api          # API REST directa de Notion (api.notion.com), OAuth broker
+    auth: oauth
+    oauth:
+      provider_id: notion   # OAuth público de Notion (NOTION_CLIENT_ID/SECRET)
+    agent_hint: "crear/leer páginas y buscar en Notion"
+
+  - key: intercom
+    label: Intercom
+    brand: "#1f8ded"
+    transport: hosted
+    auth: oauth          # OAuth de la "authenticated remote MCP spec": DCR + PKCE
+    # Sin `oauth.provider_id`: usa el auto-descubrimiento genérico (igual que Notion),
+    # no el broker de PROVIDERS. Endpoints: authorize/token/register en mcp.intercom.com.
+    url: https://mcp.intercom.com/mcp
+    token_env: INTERCOM_MCP_TOKEN   # fallback: Bearer token de Intercom pegado a mano
+    agent_hint: "usuarios, empresas y conversaciones (lectura); artículos (lectura/escritura). Solo workspaces US"
+
+  - key: miro
+    label: Miro
+    brand: "#ffd02f"
+    transport: hosted
+    auth: oauth          # OAuth 2.1 + Dynamic Client Registration (DCR + PKCE, auto-descubierto)
+    # Sin `oauth.provider_id`: usa el auto-descubrimiento genérico (como Notion/Intercom).
+    # Endpoints: authorize/token/register en mcp.miro.com.
+    url: https://mcp.miro.com/
+    agent_hint: "tableros, sticky notes, formas y conexiones (requiere plan Enterprise con MCP habilitado por el admin)"
+
+  - key: google_drive
+    label: Google Drive
+    brand: "#1a73e8"
+    transport: api          # CRUD vía Google Drive API directa (sin contenedor MCP, código propio)
+    auth: oauth
+    oauth:
+      provider_id: google-drive   # scope drive completo (CRUD)
+    agent_hint: "buscar, leer, crear, editar, mover, copiar, borrar y compartir archivos/carpetas"
+
+  - key: google_sheets
+    label: Google Sheets
+    brand: "#0f9d58"
+    transport: api          # CRUD vía Google Sheets API directa (sin contenedor MCP)
+    auth: oauth
+    oauth:
+      provider_id: google-sheets   # scope spreadsheets (read+write) + drive.readonly
+    agent_hint: "CRUD + dashboards"
+
+  - key: google_docs
+    label: Google Docs
+    brand: "#4285f4"
+    transport: api          # Google Docs API directa (sin contenedor MCP, código propio)
+    auth: oauth
+    oauth:
+      provider_id: google-docs   # scope documents (crear/leer/editar)
+    agent_hint: "crear, leer y editar documentos (insertar/anexar/reemplazar texto)"
+
+  - key: bigquery
+    label: BigQuery
+    brand: "#4285f4"
+    transport: hosted        # MCP hosted por Google (https://bigquery.googleapis.com/mcp)
+    auth: oauth
+    url: https://bigquery.googleapis.com/mcp
+    oauth:
+      provider_id: bigquery  # OAuth estándar Google (scope bigquery.readonly)
+    agent_hint: "acceso completo: consultar y crear/modificar/borrar datasets, tablas y filas"
+
+  - key: cloud_storage
+    label: Cloud Storage
+    brand: "#1a73e8"
+    transport: hosted        # MCP hosted por Google (https://storage.googleapis.com/storage/mcp)
+    auth: oauth
+    url: https://storage.googleapis.com/storage/mcp
+    oauth:
+      provider_id: cloud-storage  # OAuth Google (scope devstorage.read_write + cloud-platform)
+    agent_hint: "leer/escribir objetos y buckets (máx 8 MiB; texto, PDF, imágenes)"
+
+  - key: google_calendar
+    label: Google Calendar
+    brand: "#4285f4"
+    transport: api          # Google Calendar API directa (sin contenedor MCP, código propio)
+    auth: oauth
+    oauth:
+      provider_id: google-calendar  # OAuth Google (eventos read+write + calendarlist + freebusy)
+    agent_hint: "leer y crear/editar/borrar eventos, listar calendarios y ver disponibilidad"
+
+  - key: gmail
+    label: Gmail
+    brand: "#ea4335"
+    transport: api          # Gmail API directa (sin contenedor MCP, código propio)
+    auth: oauth
+    oauth:
+      provider_id: gmail   # OAuth Google (gmail.readonly + gmail.compose)
+    agent_hint: "buscar y leer correos, enviar y crear borradores"
+
+  - key: slack
+    label: Slack
+    brand: "#611f69"
+    transport: self_hosted
+    auth: oauth          # OAuth estándar per-usuario (no token manual)
+    package: "@modelcontextprotocol/server-slack"
+    port: 8000
+    agent_hint: "postear/leer mensajes y canales"
+    oauth:
+      provider_id: slack       # referencia al broker connectors.PROVIDERS[slack]
+      user_token: true         # usa authed_user.access_token (token por persona)
+      # mapea campos (dot-path) de la respuesta del token -> env del server stdio:
+      env_map:
+        SLACK_BOT_TOKEN: authed_user.access_token
+        SLACK_TEAM_ID: team.id

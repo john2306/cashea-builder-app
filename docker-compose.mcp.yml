@@ -1,0 +1,6 @@
+# GENERADO por `python -m app.mcp_gen` desde mcp_catalog.yaml — NO editar a mano.
+# Regenerar tras cambiar el catálogo. Levantar:
+#   docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d
+services: {}
+networks:
+  default: {}

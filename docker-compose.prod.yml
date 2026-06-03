@@ -1,0 +1,128 @@
+# Producción (DigitalOcean Droplet + Docker).
+# Correr con:  docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+#
+# - Traefik en :80/:443 con TLS Let's Encrypt vía DNS-01 (DigitalOcean) → certs wildcard.
+# - Builder/API:  https://${BUILDER_DOMAIN}      (nginx sirve la SPA + proxya /api,/auth,/ws)
+# - Apps:         https://<slug>.${APP_DOMAIN}    (Traefik enruta cada contenedor de app)
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: automation
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [default]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [default]
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size 33554432
+    env_file: [.env.prod]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/automation
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      PUBLIC_BASE_URL: https://${BUILDER_DOMAIN}
+      CORS_ORIGINS: https://${BUILDER_DOMAIN}
+      TRAEFIK_NETWORK: cashea-web
+      APP_DOMAIN: ${APP_DOMAIN}
+      APP_CERTRESOLVER: le
+      INTERNAL_GATEWAY: http://backend:8000
+      APPS_DATA_DIR: /data/apps
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - appsdata:/data/apps
+    networks: [default, web]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    command: celery -A app.tasks.celery_app.celery_app worker --loglevel=info
+    env_file: [.env.prod]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/automation
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      PUBLIC_BASE_URL: https://${BUILDER_DOMAIN}
+      TRAEFIK_NETWORK: cashea-web
+      APP_DOMAIN: ${APP_DOMAIN}
+      APP_CERTRESOLVER: le
+      INTERNAL_GATEWAY: http://backend:8000
+      APPS_DATA_DIR: /data/apps
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - appsdata:/data/apps
+    networks: [default, web]
+    depends_on:
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    networks: [web]
+    depends_on: [backend]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.builder.rule=Host(`${BUILDER_DOMAIN}`)"
+      - "traefik.http.routers.builder.entrypoints=websecure"
+      - "traefik.http.routers.builder.tls=true"
+      - "traefik.http.routers.builder.tls.certresolver=le"
+      - "traefik.http.services.builder.loadbalancer.server.port=80"
+    restart: unless-stopped
+
+  traefik:
+    image: traefik:v3.3
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=cashea-web"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.le.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.le.acme.dnschallenge=true"
+      - "--certificatesresolvers.le.acme.dnschallenge.provider=digitalocean"
+    environment:
+      DO_AUTH_TOKEN: ${DO_AUTH_TOKEN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - letsencrypt:/letsencrypt
+    networks: [web]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  appsdata:
+  letsencrypt:
+
+networks:
+  web:
+    name: cashea-web
+  default: {}
