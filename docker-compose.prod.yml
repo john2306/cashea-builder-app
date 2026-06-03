@@ -119,6 +119,12 @@ services:
       # NO se arregla con env vars en este contenedor (Traefik ignora DOCKER_API_VERSION al
       # negociar): hay que bajarle el piso al DAEMON del host con DOCKER_MIN_API_VERSION=1.24.
       # Ver DEPLOY.md → "TLS inválido + client version 1.24 is too old".
+      #
+      # El wildcard (*.app.izideploy.com) crea DOS TXT en _acme-challenge.app y DO tarda en
+      # servirlos en sus 3 NS más que el timeout por defecto (~60s) → "propagation: time limit
+      # exceeded". Le damos margen al provider de DO (hasta 10 min, sondeo cada 20s).
+      DO_PROPAGATION_TIMEOUT: "600"
+      DO_POLLING_INTERVAL: "20"
     ports:
       - "80:80"
       - "443:443"
