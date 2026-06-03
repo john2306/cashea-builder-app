@@ -34,7 +34,7 @@ def container_name(provider: str, user: str) -> str:
 
 
 def _ensure_sync(spec: McpServer, env: dict[str, str], user: str) -> str:
-    client = docker.from_env()
+    client = docker.from_env(version="auto")
     name = container_name(spec.key, user)
     try:
         c = client.containers.get(name)
@@ -68,7 +68,7 @@ async def ensure_server(spec: McpServer, env: dict[str, str], user: str = "build
 
 
 def _remove_sync(provider: str, user: str) -> None:
-    client = docker.from_env()
+    client = docker.from_env(version="auto")
     try:
         client.containers.get(container_name(provider, user)).remove(force=True)
     except docker.errors.NotFound:
@@ -113,7 +113,7 @@ async def reprovision() -> None:
 
 
 def _reap_sync() -> int:
-    client = docker.from_env()
+    client = docker.from_env(version="auto")
     now = time.time()
     reaped = 0
     for c in client.containers.list(all=True, filters={"label": "cashea.mcp=1"}):

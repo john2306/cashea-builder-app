@@ -595,7 +595,7 @@ def _remove_volume(client, name: str) -> None:
 def container_status(slug: str) -> str | None:
     """Estado del contenedor de la app ('running' | otro), o None si no existe."""
     try:
-        return docker.from_env().containers.get(f"app-{slug}").status
+        return docker.from_env(version="auto").containers.get(f"app-{slug}").status
     except docker.errors.NotFound:
         return None
 
@@ -619,7 +619,7 @@ def apply_static(slug: str, static_files: dict[str, str]) -> bool:
     """Escribe los estáticos en el contenedor VIVO (volumen /app/static) SIN reconstruir la
     imagen. StaticFiles los sirve en el próximo request (cambia mtime/ETag). Devuelve True si
     se aplicó (contenedor corriendo). Es el camino rápido para cambios solo-front."""
-    client = docker.from_env()
+    client = docker.from_env(version="auto")
     try:
         c = client.containers.get(f"app-{slug}")
     except docker.errors.NotFound:
@@ -640,7 +640,7 @@ def apply_static(slug: str, static_files: dict[str, str]) -> bool:
 def prune_dangling() -> None:
     """Borra imágenes huérfanas (<none>) que dejan los rebuilds del pipeline/QA."""
     try:
-        docker.from_env().images.prune(filters={"dangling": True})
+        docker.from_env(version="auto").images.prune(filters={"dangling": True})
     except Exception:  # noqa: BLE001
         pass
 
@@ -703,7 +703,7 @@ def run_containers(
 
     `broker`: si la app tiene jobs, la URL de Redis para que el api pueda encolar tareas.
     """
-    client = docker.from_env()
+    client = docker.from_env(version="auto")
     tag, name = f"app-{slug}:latest", f"app-{slug}"
     vol = f"app-{slug}-static"
     host = f"{slug}.{APP_DOMAIN}"
@@ -753,7 +753,7 @@ def build_and_run(
     broker: str | None = None,
 ) -> str:
     """Construye y (re)lanza la app (un solo contenedor). Devuelve la URL pública."""
-    client = docker.from_env()
+    client = docker.from_env(version="auto")
     build_app(client, slug, app_id, main_py, static_files, backend_reqs)
     return run_containers(slug, app_id, broker)
 
@@ -773,7 +773,7 @@ def qa_check(
     if js_err:
         return False, js_err
 
-    client = docker.from_env()
+    client = docker.from_env(version="auto")
     try:
         image = build_app(client, slug, app_id, main_py, static_files, backend_reqs)
     except docker.errors.BuildError as exc:
@@ -819,7 +819,7 @@ def run_celery_stack(slug: str, app_id: str) -> str:
     Worker y beat corren desde la MISMA imagen de la app (`celery -A main.celery_app ...`),
     así que el `main.py` generado debe exponer `celery_app` y su `beat_schedule`.
     """
-    client = docker.from_env()
+    client = docker.from_env(version="auto")
     app_tag = f"app-{slug}:latest"
     redis_name = f"app-{slug}-redis"
     worker_name = f"app-{slug}-worker"
@@ -858,7 +858,7 @@ def run_celery_stack(slug: str, app_id: str) -> str:
 
 def teardown_app(slug: str) -> None:
     """Elimina contenedores e imágenes de la app (incluye el modelo viejo de 2 contenedores)."""
-    client = docker.from_env()
+    client = docker.from_env(version="auto")
     for name in (
         f"app-{slug}", f"app-{slug}-api", f"app-{slug}-web",
         f"app-{slug}-redis", f"app-{slug}-worker", f"app-{slug}-beat",
