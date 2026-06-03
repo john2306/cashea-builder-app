@@ -92,8 +92,26 @@ En **Notion** (integración pública), redirect URI:
   `pg_dump` periódico y snapshots del Droplet en DO.
 
 ## Notas / troubleshooting
-- **Certs no emiten**: revisá `DO_AUTH_TOKEN` (scope Write) y que el DNS `*.app` y `@` ya
-  resuelvan a la IP (`dig izideploy.com`, `dig foo.app.izideploy.com`).
+- **TLS inválido (`ERR_CERT_AUTHORITY_INVALID`) + el log de Traefik repite
+  `client version 1.24 is too old. Minimum supported API version is 1.40`**:
+  Docker **v28+** subió el piso mínimo de API de 1.24 → 1.40, y el cliente Docker embebido en
+  Traefik ofrece 1.24 (no negocia hacia arriba). El daemon lo rechaza en bucle → Traefik nunca
+  ve los contenedores → nunca pide el cert → sirve el autofirmado por defecto. **No es DNS ni
+  Let's Encrypt.** Fix (a nivel host, persiste entre redeploys):
+  ```bash
+  sudo mkdir -p /etc/systemd/system/docker.service.d
+  sudo tee /etc/systemd/system/docker.service.d/api-compat.conf >/dev/null <<'EOF'
+  [Service]
+  Environment=DOCKER_MIN_API_VERSION=1.24
+  EOF
+  sudo systemctl daemon-reload && sudo systemctl restart docker
+  docker version --format '{{.Server.MinAPIVersion}}'   # debe decir 1.24
+  docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
+  ```
+  Diagnóstico rápido: `docker compose -f docker-compose.prod.yml logs traefik | grep -i "too old"`.
+- **Certs no emiten** (y el provider docker SÍ funciona): revisá `DO_AUTH_TOKEN` (scope Write),
+  que `izideploy.com` sea autoritativo en DO (`dig NS izideploy.com +short` → `ns*.digitalocean.com`)
+  y que `*.app` y `@` resuelvan a la IP (`dig izideploy.com`, `dig foo.app.izideploy.com`).
 - **Build de apps falla por DNS (pip/npm)** dentro de Docker: en el Droplet suele andar; si no,
   exportá `DOCKER_BUILDKIT=0` antes del `up`.
 - **Seguridad**: la plataforma ejecuta código generado en contenedores en el mismo host

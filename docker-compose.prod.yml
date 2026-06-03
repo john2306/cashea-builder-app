@@ -115,10 +115,10 @@ services:
       - "--log.level=INFO"
     environment:
       DO_AUTH_TOKEN: ${DO_AUTH_TOKEN}
-      # El daemon moderno exige API >= 1.40 y el cliente de Traefik cae a 1.24 (no negocia)
-      # → el provider docker queda en bucle de error y nunca se configuran routers/certs.
-      # Fijamos la versión de API al mínimo que el daemon declaró soportar.
-      DOCKER_API_VERSION: "1.40"
+      # NOTA: Docker v28+ exige API >= 1.40 y el cliente de Traefik ofrece 1.24 sin negociar.
+      # NO se arregla con env vars en este contenedor (Traefik ignora DOCKER_API_VERSION al
+      # negociar): hay que bajarle el piso al DAEMON del host con DOCKER_MIN_API_VERSION=1.24.
+      # Ver DEPLOY.md → "TLS inválido + client version 1.24 is too old".
     ports:
       - "80:80"
       - "443:443"
