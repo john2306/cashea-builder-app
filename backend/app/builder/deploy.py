@@ -104,6 +104,17 @@ from auth import install_auth
 
 install_auth(app)
 
+
+@app.middleware("http")
+async def _no_cache(request, call_next):
+    # La UI (HTML/JS/CSS) NO se cachea: tras un redeploy el navegador ve la versión nueva
+    # sin que el usuario tenga que hacer hard-refresh (Ctrl+Shift+R). /api no se toca.
+    resp = await call_next(request)
+    if not request.url.path.startswith("/api"):
+        resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    return resp
+
+
 _STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 _INDEX = os.path.join(_STATIC, "index.html")
 app.mount("/static", StaticFiles(directory=_STATIC), name="static")
@@ -271,9 +282,9 @@ AUTH_JS = """\
     }
     var body = _errs.join("\\n\\n").replace(/&/g, "&amp;").replace(/</g, "&lt;");
     bar.innerHTML =
-      '<div class="cashea-errbar-head">⚠️ La app tuvo ' + _errs.length +
-      ' error(es) de ejecución. Contáselo al Builder para corregirlo.' +
-      '<button id="cashea-errbar-x" aria-label="Cerrar">✕</button></div>' +
+      '<div class="cashea-errbar-head">⚠️ The app had ' + _errs.length +
+      ' runtime error(s). Share this with the Builder to fix it.' +
+      '<button id="cashea-errbar-x" aria-label="Close">✕</button></div>' +
       '<pre class="cashea-errbar-body">' + body + '</pre>';
     var x = document.getElementById("cashea-errbar-x");
     if (x) x.onclick = function () { bar.remove(); };
@@ -326,17 +337,17 @@ AUTH_JS = """\
   function showLogin() {
     screen(
       BRAND_MARK +
-      '<h1>Inicia sesión</h1><p>Accede con tu cuenta de Google para usar esta app.</p>' +
-      '<a class="cashea-gbtn" href="' + loginUrl() + '">' + G_ICON + 'Continuar con Google</a>' +
+      '<h1>Sign in</h1><p>Sign in with your Google account to use this app.</p>' +
+      '<a class="cashea-gbtn" href="' + loginUrl() + '">' + G_ICON + 'Continue with Google</a>' +
       '<div class="cashea-foot">Powered by Cashea Hub</div>'
     );
   }
   function showDenied(email) {
     screen(
-      '<div class="cashea-lock">🔒</div><h1>Sin acceso</h1>' +
-      '<p>No tenés acceso a esta app. Pedíselo al dueño para que agregue tu correo.</p>' +
-      (email ? '<p class="cashea-muted">Conectado como <b>' + email + "</b></p>" : "") +
-      '<button class="cashea-gbtn" id="cashea-switch">' + G_ICON + 'Usar otra cuenta</button>'
+      '<div class="cashea-lock">🔒</div><h1>No access</h1>' +
+      '<p>You don\\'t have access to this app. Ask the owner to add your email.</p>' +
+      (email ? '<p class="cashea-muted">Signed in as <b>' + email + "</b></p>" : "") +
+      '<button class="cashea-gbtn" id="cashea-switch">' + G_ICON + 'Use another account</button>'
     );
     document.getElementById("cashea-switch").onclick = function () {
       localStorage.removeItem(KEY);

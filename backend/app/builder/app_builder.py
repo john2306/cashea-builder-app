@@ -191,15 +191,15 @@ HTML/JS/CSS VANILLA (sin build, sin framework, sin TypeScript):
 - Implementá EXACTAMENTE las pantallas de la spec consumiendo los endpoints del backend:
   tablas con datos, KPIs/gráficos, formularios con validación para create/update, confirmación
   para delete, estados de carga y error. JS válido, sin errores de sintaxis.
-- TEXTOS de la UI en ESPAÑOL NEUTRAL (latinoamericano estándar), SIN voseo argentino: usa
-  "Cargando…", "Guardar", "Actualizar", "Buscar", "Eliminar", "Crear", "Cerrar" (no "Guardá",
-  "Actualizá", "Buscá", etc.).
-- PANEL DE LOGS (SIEMPRE, en TODA app): incluí un panel "Registro de ejecución" FIJO abajo
+- TODO el TEXTO de la UI de la app generada DEBE estar en INGLÉS (labels, botones, títulos,
+  estados de carga/error, mensajes, títulos de gráficos): "Loading…", "Save", "Update", "Search",
+  "Delete", "Create", "Close", etc. SIEMPRE en inglés, sin importar el idioma del pedido del usuario.
+- PANEL DE LOGS (SIEMPRE, en TODA app): incluí un panel "Execution log" FIJO abajo
   (position: fixed; bottom 0; ancho completo), COLAPSABLE: un encabezado clickeable con un
   indicador ▲/▼ que expande/contrae el cuerpo; arranca CONTRAÍDO (solo la barra de título, sin
   tapar la app). Al expandir: hacé `authFetch("/api/_logs")`, mostrá las líneas con su `ts`
   (hora) y `message`, resaltando en ROJO las de `level==="error"`; refrescá cada ~4s mientras
-  esté abierto (parando el intervalo al contraer) y ofrecé un botón "Refrescar". El cuerpo con
+  esté abierto (parando el intervalo al contraer) y ofrecé un botón "Refresh". El cuerpo con
   scroll y alto acotado (p.ej. 220px). ORDEN: cronológico, MÁS ANTIGUO ARRIBA y más reciente
   abajo. SCROLL: al refrescar NO reposiciones el scroll a la fuerza; preservá la posición de
   lectura del usuario y solo auto-scrolleá al fondo si YA estaba pegado al fondo (umbral ~40px:
