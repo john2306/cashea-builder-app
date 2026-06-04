@@ -63,6 +63,8 @@ async def init_db() -> None:
         )
         # Backfill del dueño en conexiones legacy (global, user_sub NULL): atribuir al usuario
         # del último evento `mcp.connect` de ese provider (mapeando email→sub vía users).
+        # NOT EXISTS: NO atribuir si el usuario ya tiene una fila propia para ese provider
+        # (evita violar el unique (user_sub, provider) cuando ya reconectó por-usuario).
         await conn.execute(
             text(
                 "UPDATE mcp_connections mc SET user_sub = u.sub, user_email = u.email "
@@ -72,7 +74,22 @@ async def init_db() -> None:
                 "  WHERE event_type = 'mcp.connect' AND user_email IS NOT NULL AND user_email <> ''"
                 "  ORDER BY provider, created_at DESC"
                 ") ev JOIN users u ON u.email = ev.email "
-                "WHERE mc.provider = ev.provider AND mc.user_sub IS NULL"
+                "WHERE mc.provider = ev.provider AND mc.user_sub IS NULL "
+                "AND NOT EXISTS ("
+                "  SELECT 1 FROM mcp_connections m2"
+                "  WHERE m2.provider = mc.provider AND m2.user_sub = u.sub"
+                ")"
+            )
+        )
+        # Limpieza: filas legacy huérfanas (user_sub aún NULL) que ya tienen equivalente
+        # por-usuario para el mismo provider → ya no sirven (el matching es por email).
+        await conn.execute(
+            text(
+                "DELETE FROM mcp_connections mc WHERE mc.user_sub IS NULL "
+                "AND EXISTS ("
+                "  SELECT 1 FROM mcp_connections m2"
+                "  WHERE m2.provider = mc.provider AND m2.user_sub IS NOT NULL"
+                ")"
             )
         )
         # El unique viejo era por `provider` (global). Ahora es por (user_sub, provider).

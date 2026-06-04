@@ -68,23 +68,25 @@ async def _capabilities_context() -> str:
 
     Se deriva del CATÁLOGO de MCP (única fuente de verdad): cualquier server nuevo
     aparece solo, con su estado de conexión real y su `agent_hint`."""
-    from sqlalchemy import select
+    from sqlalchemy import func, select
 
     from ..core.models import McpConnection
     from ..mcp.catalog import catalog_list
-    from ..mcp.connstore import current_user_sub
+    from ..mcp.connstore import current_user_email
 
-    sub = current_user_sub()
+    email = (current_user_email() or "").strip().lower()
     async with SessionLocal() as session:
         connected = (
             set(
                 (
                     await session.execute(
-                        select(McpConnection.provider).where(McpConnection.user_sub == sub)
+                        select(McpConnection.provider).where(
+                            func.lower(McpConnection.user_email) == email
+                        )
                     )
                 ).scalars().all()
             )
-            if sub
+            if email
             else set()
         )
 
@@ -560,10 +562,10 @@ async def run_agent(
     `user_sub` fija el usuario vigente: los conectores se resuelven SOLO contra los suyos.
     """
     # Aislamiento por-usuario: todo conector que se use en este run (MCP, API directa,
-    # contenedores self-hosted) se resuelve contra las conexiones de ESTE usuario.
+    # contenedores self-hosted) se resuelve contra las conexiones de ESTE usuario (por email).
     from ..mcp.connstore import set_user
 
-    set_user(user_sub)
+    set_user(user_email)
 
     new_messages: list[dict[str, Any]] = []
     selected_model = resolve_model(model)

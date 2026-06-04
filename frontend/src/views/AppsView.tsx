@@ -229,10 +229,11 @@ export function AppsView({
     fetch(`/api/apps/${id}/deploy/cancel`, { method: "POST" }).then(refresh);
   };
 
-  // Permisos por app (el backend manda `my_role`). canEdit: desplegar/editar; canOwn: eliminar/compartir.
-  const roleOf = (a: AppProject) => a.my_role || (isAdmin ? "admin" : "viewer");
-  const canEdit = (a: AppProject) => ["admin", "owner", "editor"].includes(roleOf(a));
-  const canOwn = (a: AppProject) => ["admin", "owner"].includes(roleOf(a));
+  // Permisos por app (el backend manda `my_role`). Solo el DUEÑO edita/elimina/comparte;
+  // los admins (y compartidos) ven en modo lectura las apps ajenas.
+  const roleOf = (a: AppProject) => a.my_role || "viewer";
+  const canEdit = (a: AppProject) => roleOf(a) === "owner" || roleOf(a) === "editor";
+  const canOwn = (a: AppProject) => roleOf(a) === "owner";
 
   const createAndBuild = async () => {
     const r = await fetch("/api/apps", {

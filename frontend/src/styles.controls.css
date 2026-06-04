@@ -3118,6 +3118,18 @@ button {
   flex: 0 0 auto;
   min-width: 124px;
 }
+.share-view-tag {
+  flex: 0 0 auto;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 7px;
+}
 .share-item.is-owner {
   background: var(--brand-soft, #fff6d6);
   border-color: var(--brand, #ffd200);

@@ -288,13 +288,16 @@ async def list_apps(
     ).scalars().all()
 
     for a in rows:
-        if admin:
-            a.my_role = "admin"
-        elif email == (a.owner_email or "").strip().lower():
+        # OWNER tiene prioridad (incluso si es admin); el admin sobre apps ajenas → solo view.
+        if email and email == (a.owner_email or "").strip().lower():
             a.my_role = "owner"
         else:
-            editors = [e.strip().lower() for e in (a.editor_emails or [])]
-            a.my_role = "editor" if email in editors else "viewer"
+            shared = [e.strip().lower() for e in (a.shared_emails or [])]
+            if email in shared:
+                editors = [e.strip().lower() for e in (a.editor_emails or [])]
+                a.my_role = "editor" if email in editors else "viewer"
+            else:
+                a.my_role = "admin"  # solo llega acá si es admin (member ya fue filtrado)
 
     return {"items": rows, "total": total, "limit": limit, "offset": offset}
 
@@ -697,18 +700,13 @@ def _require_app_secret(app_id: str, x_app_secret: str) -> None:
 async def get_shares(
     app_id: str, request: Request, session: AsyncSession = Depends(get_session)
 ):
-    """Lista de compartidos con su rol (view|edit). El dueño viaja aparte (no-eliminable)."""
+    """Lista de correos con acceso (SOLO lectura). El dueño viaja aparte (no-eliminable)."""
     ap = await _app_for_request(session, request, app_id)
     owner = (ap.owner_email or "").strip().lower() or None
-    editors = {e.strip().lower() for e in (ap.editor_emails or [])}
-    shares = [
-        {"email": e, "role": "edit" if e in editors else "view"}
-        for e in sorted(set(ap.shared_emails or []))
-        if e != owner
-    ]
-    # `can_manage` indica si el solicitante puede editar la lista (solo owner/admin).
-    can_manage = (await _app_role(session, request, ap)) in ("admin", "owner")
-    return {"owner": owner, "shares": shares, "can_manage": can_manage}
+    emails = sorted({e.strip().lower() for e in (ap.shared_emails or [])} - {owner})
+    # `can_manage`: solo el DUEÑO gestiona la lista (los admins ven en modo lectura).
+    can_manage = (await _app_role(session, request, ap)) == "owner"
+    return {"owner": owner, "emails": emails, "can_manage": can_manage}
 
 
 @app.put("/api/apps/{app_id}/shares")
@@ -716,31 +714,24 @@ async def set_shares(
     app_id: str, body: dict, request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    """Reemplaza la lista de compartidos. Solo owner/admin. Cada item: {email, role:view|edit}.
-    El dueño SIEMPRE conserva acceso (se reinyecta) y no es 'editor' (ya tiene control total)."""
+    """Reemplaza la lista de compartidos (SOLO lectura, sin roles). Solo el DUEÑO.
+    Acepta `emails: [...]` (o `shares:[{email}]`). El dueño siempre conserva acceso."""
     ap = await _app_require_owner(session, request, app_id)
     owner = (ap.owner_email or "").strip().lower() or None
-    emails: set[str] = set()
-    editors: set[str] = set()
-    for item in body.get("shares") or []:
-        e = (item.get("email") or "").strip().lower()
-        if not e:
-            continue
-        emails.add(e)
-        if (item.get("role") or "view").lower() == "edit":
-            editors.add(e)
+    raw = body.get("emails")
+    if raw is None:  # compat: aceptar también [{email, ...}]
+        raw = [it.get("email") for it in (body.get("shares") or [])]
+    emails = {e.strip().lower() for e in (raw or []) if e and e.strip()}
     if owner:
         emails.add(owner)
-        editors.discard(owner)
     ap.shared_emails = sorted(emails)
-    ap.editor_emails = sorted(editors)
+    ap.editor_emails = []  # compartir es solo-lectura; nadie es editor salvo el dueño
     await session.commit()
-    shares = [
-        {"email": e, "role": "edit" if e in editors else "view"}
-        for e in sorted(emails)
-        if e != owner
-    ]
-    return {"owner": owner, "shares": shares, "can_manage": True}
+    return {
+        "owner": owner,
+        "emails": sorted(emails - {owner}),
+        "can_manage": True,
+    }
 
 
 @app.get("/api/apps/{app_id}/access")
@@ -768,29 +759,35 @@ async def owner_token(
     """Vende el token del DUEÑO para un conector (las apps usan las credenciales del dueño,
     no las del visor). Autorizado por el secreto por-app."""
     _require_app_secret(app_id, x_app_secret)
-    from .mcp.connstore import get_conn, sub_for_email, use_user
+    from .mcp.connstore import get_conn, use_user
 
     # Normaliza el provider a la CLAVE del catálogo (acepta guion o guion bajo):
     # google-docs == google_docs, google-sheets == google_sheets, etc.
     key = provider.replace("-", "_")
 
-    # La app usa las credenciales del DUEÑO → resolvemos su user_sub.
+    # La app usa las credenciales del DUEÑO → resolvemos por su EMAIL (identidad estable).
     ap = await session.get(AppProject, app_id)
-    owner_sub = await sub_for_email(session, ap.owner_email if ap else None)
+    owner_email = (ap.owner_email or "").strip().lower() if ap else ""
 
     # google_sheets: reutiliza el refresh ya implementado (con el usuario = dueño).
     if key == "google_sheets":
         from .connectors import sheets as sheets_api
 
         try:
-            with use_user(owner_sub):
+            with use_user(owner_email):
                 return {"access_token": await sheets_api._token(), "token_type": "Bearer"}
         except sheets_api.NotConnected:
-            raise HTTPException(status_code=409, detail="El dueño no conectó Google Sheets.")
+            raise HTTPException(
+                status_code=409,
+                detail=f"The app owner ({owner_email or 'unknown'}) hasn't connected Google Sheets.",
+            )
 
-    row = await get_conn(session, key, owner_sub)
+    row = await get_conn(session, key, owner_email)
     if row is None:
-        raise HTTPException(status_code=409, detail=f"El dueño no conectó {provider}.")
+        raise HTTPException(
+            status_code=409,
+            detail=f"The app owner ({owner_email or 'unknown'}) hasn't connected {provider}.",
+        )
 
     if key == "slack":
         env = json.loads(decrypt(row.env_json)) if row.env_json else {}
@@ -890,16 +887,16 @@ async def app_connector_proxy(
     manda {"arguments": {...}} y la plataforma habla con el MCP server con el token del dueño
     (nunca expuesto a la app). Auth por X-App-Secret + auditoría en Logs."""
     from .mcp.proxy import ConnectorError, call_owner_tool
-    from .mcp.connstore import sub_for_email, use_user
+    from .mcp.connstore import use_user
 
     _require_app_secret(app_id, x_app_secret)
     ap = await session.get(AppProject, app_id)
-    owner_sub = await sub_for_email(session, ap.owner_email if ap else None)
+    owner_email = (ap.owner_email or "").strip().lower() if ap else ""
     args = (body or {}).get("arguments")
     if args is None:
         args = {k: v for k, v in (body or {}).items() if k != "arguments"}
     try:
-        with use_user(owner_sub):  # la app corre con la conexión del dueño
+        with use_user(owner_email):  # la app corre con la conexión del dueño
             res = await call_owner_tool(provider, tool, args)
     except ConnectorError as exc:
         await log_event("connector.call", status="error", app_id=app_id, provider=provider,
@@ -994,12 +991,12 @@ async def dashboard_data(
         raise HTTPException(status_code=404, detail="Este dashboard no está configurado.")
 
     from .connectors import sheets as sheets_api
-    from .mcp.connstore import sub_for_email, use_user
+    from .mcp.connstore import use_user
 
-    owner_sub = await sub_for_email(session, app_project.owner_email if app_project else None)
+    owner_email = (app_project.owner_email or "").strip().lower() if app_project else ""
     rng = cfg.get("range") or ""
     try:
-        with use_user(owner_sub):  # se lee con la Sheet del DUEÑO
+        with use_user(owner_email):  # se lee con la Sheet del DUEÑO
             if not rng:
                 meta = await sheets_api.metadata(cfg["spreadsheet_id"])
                 rng = meta["sheets"][0]["title"] if meta["sheets"] else "Sheet1"
@@ -1285,19 +1282,21 @@ async def _require_admin_db(request: Request, session: AsyncSession) -> str:
 async def _app_role(
     session: AsyncSession, request: Request, ap: AppProject
 ) -> str | None:
-    """Rol del solicitante sobre la app: admin | owner | editor | viewer, o None si sin acceso."""
+    """Rol del solicitante sobre la app: owner | editor | viewer | admin, o None si sin acceso.
+    OWNER tiene prioridad (incluso si es admin). El rol `admin` es solo-lectura: un admin ve las
+    apps de otros pero NO puede editarlas/eliminarlas (no es dueño)."""
     email = (_req_email(request) or "").strip().lower()
-    if await _is_admin_db(session, email):
-        return "admin"
     if not email:
         return None
     if email == (ap.owner_email or "").strip().lower():
         return "owner"
     shared = [e.strip().lower() for e in (ap.shared_emails or [])]
-    if email not in shared:
-        return None
-    editors = [e.strip().lower() for e in (ap.editor_emails or [])]
-    return "editor" if email in editors else "viewer"
+    if email in shared:
+        editors = [e.strip().lower() for e in (ap.editor_emails or [])]
+        return "editor" if email in editors else "viewer"
+    if await _is_admin_db(session, email):
+        return "admin"  # admin viendo una app ajena → solo lectura
+    return None
 
 
 async def _app_for_request(
@@ -1315,33 +1314,31 @@ async def _app_for_request(
 async def _app_require_edit(
     session: AsyncSession, request: Request, app_id: str
 ) -> AppProject:
-    """Permiso de EDICIÓN (desplegar/editar): admin / owner / editor. Viewers → 403."""
+    """Permiso de EDICIÓN (desplegar/editar): solo owner o editor. Admin/viewer → 403."""
     ap = await session.get(AppProject, app_id)
     if ap is None:
         raise HTTPException(status_code=404, detail="App no encontrada")
     role = await _app_role(session, request, ap)
-    if role in ("admin", "owner", "editor"):
+    if role in ("owner", "editor"):
         return ap
     if role is None:
         raise HTTPException(status_code=403, detail="Sin acceso a esta app")
-    raise HTTPException(status_code=403, detail="Necesitas permiso de edición sobre esta app")
+    raise HTTPException(status_code=403, detail="Solo el dueño puede editar esta app")
 
 
 async def _app_require_owner(
     session: AsyncSession, request: Request, app_id: str
 ) -> AppProject:
-    """Acciones reservadas (eliminar / gestionar compartidos): solo admin u owner."""
+    """Acciones reservadas (eliminar / gestionar compartidos): SOLO el dueño."""
     ap = await session.get(AppProject, app_id)
     if ap is None:
         raise HTTPException(status_code=404, detail="App no encontrada")
     role = await _app_role(session, request, ap)
-    if role in ("admin", "owner"):
+    if role == "owner":
         return ap
     if role is None:
         raise HTTPException(status_code=403, detail="Sin acceso a esta app")
-    raise HTTPException(
-        status_code=403, detail="Solo el dueño o un admin pueden hacer esto"
-    )
+    raise HTTPException(status_code=403, detail="Solo el dueño puede hacer esto")
 
 
 def _parse_dt(s: str, end: bool = False):
@@ -1655,18 +1652,19 @@ async def mcp_connections(
 ):
     from .mcp.catalog import catalog_list
 
-    # Estado de conexión SOLO del usuario actual (conectores por-usuario).
-    user = getattr(request.state, "user", None) or {}
-    sub = user.get("sub") if isinstance(user, dict) else None
+    # Estado de conexión SOLO del usuario actual (conectores por-usuario, por email).
+    email = (_req_email(request) or "").strip().lower()
     oauth_connected = (
         set(
             (
                 await session.execute(
-                    select(McpConnection.provider).where(McpConnection.user_sub == sub)
+                    select(McpConnection.provider).where(
+                        func.lower(McpConnection.user_email) == email
+                    )
                 )
             ).scalars().all()
         )
-        if sub
+        if email
         else set()
     )
     out = []
@@ -1860,17 +1858,18 @@ async def mcp_oauth_callback(
             return _popup_html(f"OAuth de {spec.label}: {exc}", ok=False)
 
     st_sub = st.get("user_sub")
+    st_email = (st.get("user_email") or "").strip().lower()
     existing = (
         await session.execute(
             select(McpConnection).where(
                 McpConnection.provider == st["provider"],
-                McpConnection.user_sub == st_sub,
+                func.lower(McpConnection.user_email) == st_email,
             )
         )
     ).scalar_one_or_none()
     fields = dict(
         user_sub=st_sub,
-        user_email=st.get("user_email"),
+        user_email=st_email,
         access_token=encrypt(access),
         # Guardamos refresh + cliente para refrescar (Sheets API directa; conector hosted).
         refresh_token=encrypt(token["refresh_token"]) if token.get("refresh_token") else
@@ -1897,7 +1896,7 @@ async def mcp_oauth_callback(
         try:
             from .mcp.pool import ensure_server
 
-            await ensure_server(spec, {k: str(v) for k, v in env.items()}, st.get("user_sub"))
+            await ensure_server(spec, {k: str(v) for k, v in env.items()}, st_email)
         except Exception:  # noqa: BLE001
             pass
     # Invalida el cache de tools puenteadas para que el agente vea el cambio enseguida.
@@ -1931,17 +1930,18 @@ async def mcp_callback(
         return _popup_html("El MCP no devolvió access_token.", ok=False)
 
     st_sub = st.get("user_sub")
+    st_email = (st.get("user_email") or "").strip().lower()
     existing = (
         await session.execute(
             select(McpConnection).where(
                 McpConnection.provider == st["provider"],
-                McpConnection.user_sub == st_sub,
+                func.lower(McpConnection.user_email) == st_email,
             )
         )
     ).scalar_one_or_none()
     fields = dict(
         user_sub=st_sub,
-        user_email=st.get("user_email"),
+        user_email=st_email,
         access_token=encrypt(access_token),
         refresh_token=encrypt(token.get("refresh_token")),
         client_id=st["client_id"],
@@ -1967,14 +1967,14 @@ async def mcp_callback(
 async def mcp_disconnect(
     provider: str, request: Request, session: AsyncSession = Depends(get_session)
 ):
-    # Conector POR-USUARIO: cada quien desconecta SOLO el suyo (sin gate admin).
-    user = getattr(request.state, "user", None) or {}
-    sub = user.get("sub") if isinstance(user, dict) else None
-    if not sub:
+    # Conector POR-USUARIO: cada quien desconecta SOLO el suyo (sin gate admin), por email.
+    email = (_req_email(request) or "").strip().lower()
+    if not email:
         raise HTTPException(status_code=401, detail="Sesión requerida.")
     await session.execute(
         delete(McpConnection).where(
-            McpConnection.provider == provider, McpConnection.user_sub == sub
+            McpConnection.provider == provider,
+            func.lower(McpConnection.user_email) == email,
         )
     )
     await session.commit()
@@ -1986,7 +1986,7 @@ async def mcp_disconnect(
     try:
         from .mcp.pool import remove_server
 
-        await remove_server(provider, sub)
+        await remove_server(provider, email)
     except Exception:  # noqa: BLE001
         pass
     from .mcp import bridge as mcp_bridge

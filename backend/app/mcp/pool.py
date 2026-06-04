@@ -100,15 +100,15 @@ async def reprovision() -> None:
     catalog = load_catalog()
     async with SessionLocal() as session:
         rows = (await session.execute(select(McpConnection))).scalars().all()
-        # Un contenedor por (user_sub, provider): aislamiento por usuario.
-        creds = [(r.user_sub, r.provider, r.env_json) for r in rows if r.user_sub]
-    for user_sub, provider, env_json in creds:
+        # Un contenedor por (user_email, provider): aislamiento por usuario.
+        creds = [(r.user_email, r.provider, r.env_json) for r in rows if r.user_email]
+    for user_email, provider, env_json in creds:
         spec = catalog.get(provider)
         if spec is None or spec.transport != "self_hosted" or spec.auth != "oauth" or not env_json:
             continue
         try:
             env = {k: str(v) for k, v in _json.loads(decrypt(env_json)).items()}
-            await ensure_server(spec, env, user_sub)
+            await ensure_server(spec, env, user_email)
         except Exception:  # noqa: BLE001
             continue
 
