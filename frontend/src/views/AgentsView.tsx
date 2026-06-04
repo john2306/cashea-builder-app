@@ -408,7 +408,6 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
               type="button"
               onClick={jumpToBottom}
               aria-label="Jump to bottom"
-              title="Jump to bottom"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M6 9l6 6 6-6" />
