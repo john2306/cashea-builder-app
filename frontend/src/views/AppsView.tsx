@@ -145,6 +145,20 @@ export function AppsView({
     return () => clearTimeout(t);
   }, [load]);
 
+  // Refresca al volver a la pestaña/ventana: si otra persona eliminó/compartió una app,
+  // el cambio aparece solo (sin que el usuario tenga que recargar a mano).
+  useEffect(() => {
+    const onFocus = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [refresh]);
+
   // Dueños para el filtro de admin (todos los usuarios conocidos).
   useEffect(() => {
     if (!isAdmin) return;
