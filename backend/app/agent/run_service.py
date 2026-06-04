@@ -52,6 +52,7 @@ async def start_run(
     conversation_id: str | None,
     model: str | None,
     user_email: str | None,
+    user_sub: str | None = None,
 ) -> dict[str, str]:
     """Crea/asegura conversación+app, persiste el turno del usuario y dispara el run en
     background. Devuelve {run_id, conversation_id, app_id} para que el cliente abra el SSE."""
@@ -93,7 +94,7 @@ async def start_run(
     await emit({"type": "app", "app_id": app_id})
 
     task = asyncio.create_task(
-        _run(run_id, conversation_id, app_id, messages, model, user_email, r, emit)
+        _run(run_id, conversation_id, app_id, messages, model, user_email, user_sub, r, emit)
     )
     _tasks[run_id] = task
     task.add_done_callback(lambda _t: _tasks.pop(run_id, None))
@@ -101,10 +102,13 @@ async def start_run(
     return {"run_id": run_id, "conversation_id": conversation_id, "app_id": app_id}
 
 
-async def _run(run_id, conversation_id, app_id, messages, model, user_email, r, emit) -> None:
+async def _run(
+    run_id, conversation_id, app_id, messages, model, user_email, user_sub, r, emit
+) -> None:
     try:
         new_messages = await run_agent(
-            messages, emit, model=model, app_id=app_id, user_email=user_email
+            messages, emit, model=model, app_id=app_id,
+            user_email=user_email, user_sub=user_sub,
         )
         async with SessionLocal() as session:
             for msg in new_messages:

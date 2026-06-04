@@ -20,7 +20,7 @@ from sqlalchemy import select
 
 from ..core.crypto import decrypt, encrypt
 from ..core.db import SessionLocal
-from ..core.models import McpConnection
+from ..mcp.connstore import get_conn
 
 GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -33,11 +33,7 @@ class NotConnected(RuntimeError):
 async def _token() -> str:
     """Access token válido para Gmail (refresca y persiste si expiró)."""
     async with SessionLocal() as session:
-        row = (
-            await session.execute(
-                select(McpConnection).where(McpConnection.provider == "gmail")
-            )
-        ).scalar_one_or_none()
+        row = await get_conn(session, "gmail")
         if row is None or not row.access_token:
             raise NotConnected("Gmail no está conectado (conéctalo en Connectors).")
 

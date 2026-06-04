@@ -17,7 +17,7 @@ from sqlalchemy import select
 from . import client as mcp_client
 from ..core.db import SessionLocal
 from .catalog import load_catalog
-from ..core.models import McpConnection
+from .connstore import get_conn
 
 # Cache del listado puenteado (evita listar tools de los contenedores en cada mensaje).
 _CACHE_TTL = 30.0  # segundos
@@ -34,13 +34,9 @@ async def _credentials_ready(spec) -> bool:
     if spec.auth == "env":
         return bool(spec.env) and all(os.environ.get(v) for v in spec.env)
     if spec.auth == "oauth":
-        # Listo si el usuario ya conectó por OAuth (hay fila con env resuelto).
+        # Listo si el USUARIO VIGENTE ya conectó por OAuth (fila con env resuelto).
         async with SessionLocal() as session:
-            row = (
-                await session.execute(
-                    select(McpConnection).where(McpConnection.provider == spec.key)
-                )
-            ).scalar_one_or_none()
+            row = await get_conn(session, spec.key)
         return bool(row and row.env_json)
     return True
 

@@ -15,7 +15,7 @@ import httpx
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, case, delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .mcp import oauth as mcp_oauth
@@ -36,8 +36,10 @@ from .core.models import (
     EventLog,
     McpConnection,
     Message,
+    User,
 )
 from .core.schemas import (
+    AppListPage,
     AppProjectCreate,
     AppProjectDetail,
     AppProjectOut,
@@ -221,12 +223,80 @@ async def get_conversation(
     )
 
 
-@app.get("/api/apps", response_model=list[AppProjectOut])
-async def list_apps(session: AsyncSession = Depends(get_session)):
+@app.get("/api/apps", response_model=AppListPage)
+async def list_apps(
+    request: Request,
+    q: str = "",
+    owner: str = "",
+    scope: str = "",  # member: ""/all | mine | shared (mías / compartidas conmigo / ambas)
+    sort: str = "new",
+    limit: int = 30,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_session),
+):
+    """Lista paginada (escala a miles de apps): búsqueda/orden/filtro server-side.
+    Admin → todas (filtro opcional `?owner=`); member → solo propias + compartidas.
+    Setea `my_role` por app (admin|owner|editor|viewer) para que la UI gobierne las acciones."""
+    email = (_req_email(request) or "").strip().lower()
+    admin = await _is_admin_db(session, email)
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+
+    conds = []
+    if q.strip():
+        conds.append(AppProject.title.ilike(f"%{q.strip()}%"))
+    if admin:
+        if owner.strip():
+            conds.append(func.lower(AppProject.owner_email) == owner.strip().lower())
+    else:
+        # propias O en la allowlist (shared_emails es JSON → contención con @> en jsonb).
+        # OJO: hay que castear AMBOS lados a jsonb (el bind llega como varchar).
+        shared = text("app_projects.shared_emails::jsonb @> CAST(:em AS jsonb)").bindparams(
+            em=json.dumps([email])
+        )
+        own = func.lower(AppProject.owner_email) == email
+        if scope == "mine":
+            conds.append(own)
+        elif scope == "shared":  # compartidas conmigo (no soy el dueño)
+            conds.append(and_(shared, func.lower(AppProject.owner_email) != email))
+        else:  # ambas
+            conds.append(or_(own, shared))
+
+    base = select(AppProject)
+    if conds:
+        base = base.where(*conds)
+
+    total = (
+        await session.execute(select(func.count()).select_from(base.subquery()))
+    ).scalar() or 0
+
+    if sort == "live":
+        ordered = base.order_by(
+            case((AppProject.deploy_state == "deployed", 0), else_=1),
+            AppProject.updated_at.desc(),
+        )
+    else:
+        order_col = {
+            "old": AppProject.updated_at.asc(),
+            "az": AppProject.title.asc(),
+            "za": AppProject.title.desc(),
+        }.get(sort, AppProject.updated_at.desc())
+        ordered = base.order_by(order_col)
+
     rows = (
-        await session.execute(select(AppProject).order_by(AppProject.updated_at.desc()))
+        await session.execute(ordered.limit(limit).offset(offset))
     ).scalars().all()
-    return rows
+
+    for a in rows:
+        if admin:
+            a.my_role = "admin"
+        elif email == (a.owner_email or "").strip().lower():
+            a.my_role = "owner"
+        else:
+            editors = [e.strip().lower() for e in (a.editor_emails or [])]
+            a.my_role = "editor" if email in editors else "viewer"
+
+    return {"items": rows, "total": total, "limit": limit, "offset": offset}
 
 
 @app.get("/api/config")
@@ -268,19 +338,20 @@ async def create_app(
 
 
 @app.get("/api/apps/{app_id}", response_model=AppProjectDetail)
-async def get_app(app_id: str, session: AsyncSession = Depends(get_session)):
-    app_project = await session.get(AppProject, app_id)
-    if app_project is None:
-        raise HTTPException(status_code=404, detail="App no encontrada")
-    return app_project
+async def get_app(
+    app_id: str, request: Request, session: AsyncSession = Depends(get_session)
+):
+    ap = await _app_for_request(session, request, app_id)
+    ap.my_role = await _app_role(session, request, ap) or "viewer"
+    return ap
 
 
 @app.get("/api/apps/{app_id}/spec")
-async def get_app_spec(app_id: str, session: AsyncSession = Depends(get_session)):
+async def get_app_spec(
+    app_id: str, request: Request, session: AsyncSession = Depends(get_session)
+):
     """Devuelve la AppSpec (para el paso de revisión previo al deploy). null si no hay."""
-    app_project = await session.get(AppProject, app_id)
-    if app_project is None:
-        raise HTTPException(status_code=404, detail="App no encontrada")
+    app_project = await _app_for_request(session, request, app_id)
     return {"spec": app_project.app_spec or None}
 
 
@@ -290,9 +361,7 @@ async def update_app_spec(
 ):
     """Guarda la AppSpec editada por el usuario (paso de revisión). Valida la spec y rechaza
     `location` placeholder/vacío (mismo guardrail que define_app)."""
-    app_project = await session.get(AppProject, app_id)
-    if app_project is None:
-        raise HTTPException(status_code=404, detail="App no encontrada")
+    app_project = await _app_require_edit(session, request, app_id)
     from .agent.runner import _placeholder_locations
     from .builder.app_builder import AppSpec
 
@@ -323,9 +392,7 @@ async def update_app(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    app_project = await session.get(AppProject, app_id)
-    if app_project is None:
-        raise HTTPException(status_code=404, detail="App no encontrada")
+    app_project = await _app_require_edit(session, request, app_id)
 
     changed = [k for k, v in payload.model_dump(exclude_none=True).items()]
 
@@ -351,6 +418,7 @@ async def update_app(
         message=f"App actualizada ({', '.join(changed) or 'sin cambios'})",
         meta={"fields": changed},
     )
+    app_project.my_role = await _app_role(session, request, app_project) or "viewer"
     return app_project
 
 
@@ -358,9 +426,7 @@ async def update_app(
 async def delete_app(
     app_id: str, request: Request, session: AsyncSession = Depends(get_session)
 ):
-    app_project = await session.get(AppProject, app_id)
-    if app_project is None:
-        raise HTTPException(status_code=404, detail="App no encontrada")
+    app_project = await _app_require_owner(session, request, app_id)
     slug = app_project.slug
     title = app_project.title
     # DELETE a nivel Core sobre la conversación: el ON DELETE CASCADE de la BD
@@ -391,9 +457,11 @@ async def _slug_taken(session, slug: str, exclude_id: str) -> bool:
 
 @app.get("/api/apps/{app_id}/subdomain-check")
 async def subdomain_check(
-    app_id: str, slug: str = "", session: AsyncSession = Depends(get_session)
+    app_id: str, request: Request, slug: str = "",
+    session: AsyncSession = Depends(get_session),
 ):
     """Normaliza un subdominio propuesto e indica si está disponible (no usado por otra app)."""
+    await _app_require_edit(session, request, app_id)
     normalized = _slugify(slug)
     available = bool(normalized) and not await _slug_taken(session, normalized, app_id)
     return {"slug": normalized, "available": available}
@@ -409,9 +477,7 @@ async def deploy_app(
     """Inicia (o re-ejecuta) el despliegue. Acepta `slug` (subdominio) opcional: debe ser
     único; si ya está en uso por otra app devuelve 409. Si no se envía, se conserva el
     actual o se genera del título."""
-    app_project = await session.get(AppProject, app_id)
-    if app_project is None:
-        raise HTTPException(status_code=404, detail="App no encontrada")
+    app_project = await _app_require_edit(session, request, app_id)
     if app_project.deploy_state == "deploying":
         raise HTTPException(status_code=409, detail="La app ya se está desplegando.")
 
@@ -467,12 +533,16 @@ async def deploy_app(
     )
     result = run_deploy_task.delay(app_project.id, app_project.slug, force_full, email or "")
     _deploy_tasks[app_project.id] = result.id
+    app_project.my_role = await _app_role(session, request, app_project) or "viewer"
     return app_project
 
 
 @app.post("/api/apps/{app_id}/deploy/cancel", status_code=200)
-async def cancel_deploy(app_id: str, session: AsyncSession = Depends(get_session)):
+async def cancel_deploy(
+    app_id: str, request: Request, session: AsyncSession = Depends(get_session)
+):
     """Cancela un despliegue en curso (revoca la tarea Celery y deja la app en 'idle')."""
+    await _app_require_edit(session, request, app_id)
     task_id = _deploy_tasks.pop(app_id, None)
     if task_id:
         try:
@@ -495,8 +565,11 @@ async def cancel_deploy(app_id: str, session: AsyncSession = Depends(get_session
 
 
 @app.get("/api/apps/{app_id}/versions")
-async def app_versions(app_id: str):
+async def app_versions(
+    app_id: str, request: Request, session: AsyncSession = Depends(get_session)
+):
     """Historial de versiones desplegadas (commits del repo git local de la app)."""
+    await _app_for_request(session, request, app_id)
     from .builder.app_repo import list_versions
 
     return await asyncio.to_thread(list_versions, app_id)
@@ -513,9 +586,7 @@ async def app_rollback(
     sha = (payload or {}).get("sha")
     if not sha:
         raise HTTPException(status_code=400, detail="Falta 'sha'.")
-    app_project = await session.get(AppProject, app_id)
-    if app_project is None:
-        raise HTTPException(status_code=404, detail="App no encontrada")
+    app_project = await _app_require_edit(session, request, app_id)
     if app_project.deploy_state == "deploying":
         raise HTTPException(status_code=409, detail="La app ya se está desplegando.")
     if not app_project.slug:
@@ -554,18 +625,21 @@ async def app_rollback(
     )
     result = run_deploy_task.delay(app_project.id, app_project.slug, False, email or "")
     _deploy_tasks[app_project.id] = result.id
+    app_project.my_role = await _app_role(session, request, app_project) or "viewer"
     return app_project
 
 
 @app.get("/api/apps/{app_id}/deploy/stream")
-async def deploy_stream(app_id: str, session: AsyncSession = Depends(get_session)):
+async def deploy_stream(
+    app_id: str, request: Request, session: AsyncSession = Depends(get_session)
+):
     """Stream SSE del progreso del deploy (Redis pub/sub, canal deploy:{app_id}).
 
     Emite primero el estado actual, luego cada evento; cierra al recibir done/error/cancelled.
     """
     import redis.asyncio as aioredis
 
-    ap = await session.get(AppProject, app_id)
+    ap = await _app_for_request(session, request, app_id)
     current_stage = ap.deploy_stage if ap else None
     current_state = ap.deploy_state if ap else "idle"
 
@@ -620,32 +694,53 @@ def _require_app_secret(app_id: str, x_app_secret: str) -> None:
 
 
 @app.get("/api/apps/{app_id}/shares")
-async def get_shares(app_id: str, session: AsyncSession = Depends(get_session)):
-    ap = await session.get(AppProject, app_id)
-    if ap is None:
-        raise HTTPException(status_code=404, detail="App no encontrada")
+async def get_shares(
+    app_id: str, request: Request, session: AsyncSession = Depends(get_session)
+):
+    """Lista de compartidos con su rol (view|edit). El dueño viaja aparte (no-eliminable)."""
+    ap = await _app_for_request(session, request, app_id)
     owner = (ap.owner_email or "").strip().lower() or None
-    others = sorted(e for e in (ap.shared_emails or []) if e != owner)
-    # El dueño siempre figura y va primero; `owner` viaja aparte para marcarlo no-eliminable.
-    emails = ([owner] if owner else []) + others
-    return {"emails": emails, "owner": owner}
+    editors = {e.strip().lower() for e in (ap.editor_emails or [])}
+    shares = [
+        {"email": e, "role": "edit" if e in editors else "view"}
+        for e in sorted(set(ap.shared_emails or []))
+        if e != owner
+    ]
+    # `can_manage` indica si el solicitante puede editar la lista (solo owner/admin).
+    can_manage = (await _app_role(session, request, ap)) in ("admin", "owner")
+    return {"owner": owner, "shares": shares, "can_manage": can_manage}
 
 
 @app.put("/api/apps/{app_id}/shares")
 async def set_shares(
-    app_id: str, body: dict, session: AsyncSession = Depends(get_session),
+    app_id: str, body: dict, request: Request,
+    session: AsyncSession = Depends(get_session),
 ):
-    ap = await session.get(AppProject, app_id)
-    if ap is None:
-        raise HTTPException(status_code=404, detail="App no encontrada")
-    emails = {e.strip().lower() for e in (body.get("emails") or []) if e and e.strip()}
-    # El dueño NO se puede quitar: se reinyecta siempre (defensa en backend, no solo en UI).
+    """Reemplaza la lista de compartidos. Solo owner/admin. Cada item: {email, role:view|edit}.
+    El dueño SIEMPRE conserva acceso (se reinyecta) y no es 'editor' (ya tiene control total)."""
+    ap = await _app_require_owner(session, request, app_id)
     owner = (ap.owner_email or "").strip().lower() or None
+    emails: set[str] = set()
+    editors: set[str] = set()
+    for item in body.get("shares") or []:
+        e = (item.get("email") or "").strip().lower()
+        if not e:
+            continue
+        emails.add(e)
+        if (item.get("role") or "view").lower() == "edit":
+            editors.add(e)
     if owner:
         emails.add(owner)
+        editors.discard(owner)
     ap.shared_emails = sorted(emails)
+    ap.editor_emails = sorted(editors)
     await session.commit()
-    return {"emails": ap.shared_emails, "owner": owner}
+    shares = [
+        {"email": e, "role": "edit" if e in editors else "view"}
+        for e in sorted(emails)
+        if e != owner
+    ]
+    return {"owner": owner, "shares": shares, "can_manage": True}
 
 
 @app.get("/api/apps/{app_id}/access")
@@ -673,22 +768,27 @@ async def owner_token(
     """Vende el token del DUEÑO para un conector (las apps usan las credenciales del dueño,
     no las del visor). Autorizado por el secreto por-app."""
     _require_app_secret(app_id, x_app_secret)
+    from .mcp.connstore import get_conn, sub_for_email, use_user
+
     # Normaliza el provider a la CLAVE del catálogo (acepta guion o guion bajo):
     # google-docs == google_docs, google-sheets == google_sheets, etc.
     key = provider.replace("-", "_")
 
-    # google_sheets: reutiliza el refresh ya implementado.
+    # La app usa las credenciales del DUEÑO → resolvemos su user_sub.
+    ap = await session.get(AppProject, app_id)
+    owner_sub = await sub_for_email(session, ap.owner_email if ap else None)
+
+    # google_sheets: reutiliza el refresh ya implementado (con el usuario = dueño).
     if key == "google_sheets":
         from .connectors import sheets as sheets_api
 
         try:
-            return {"access_token": await sheets_api._token(), "token_type": "Bearer"}
+            with use_user(owner_sub):
+                return {"access_token": await sheets_api._token(), "token_type": "Bearer"}
         except sheets_api.NotConnected:
             raise HTTPException(status_code=409, detail="El dueño no conectó Google Sheets.")
 
-    row = (
-        await session.execute(select(McpConnection).where(McpConnection.provider == key))
-    ).scalar_one_or_none()
+    row = await get_conn(session, key, owner_sub)
     if row is None:
         raise HTTPException(status_code=409, detail=f"El dueño no conectó {provider}.")
 
@@ -736,12 +836,14 @@ async def agent_run(body: dict, request: Request):
     attachments = body.get("attachments") or []
     if not content and not attachments:
         raise HTTPException(status_code=400, detail="Mensaje vacío.")
+    user = getattr(request.state, "user", None) or {}
     return await start_run(
         content=content,
         attachments=attachments,
         conversation_id=body.get("conversation_id"),
         model=body.get("model"),
         user_email=_req_email(request),
+        user_sub=user.get("sub") if isinstance(user, dict) else None,
     )
 
 
@@ -782,18 +884,23 @@ async def app_connector_proxy(
     app_id: str, provider: str, tool: str,
     body: dict | None = Body(default=None),
     x_app_secret: str = Header(default=""),
+    session: AsyncSession = Depends(get_session),
 ):
     """Ejecuta una tool de un conector MCP (Notion, etc.) con la conexión del DUEÑO. La app
     manda {"arguments": {...}} y la plataforma habla con el MCP server con el token del dueño
     (nunca expuesto a la app). Auth por X-App-Secret + auditoría en Logs."""
     from .mcp.proxy import ConnectorError, call_owner_tool
+    from .mcp.connstore import sub_for_email, use_user
 
     _require_app_secret(app_id, x_app_secret)
+    ap = await session.get(AppProject, app_id)
+    owner_sub = await sub_for_email(session, ap.owner_email if ap else None)
     args = (body or {}).get("arguments")
     if args is None:
         args = {k: v for k, v in (body or {}).items() if k != "arguments"}
     try:
-        res = await call_owner_tool(provider, tool, args)
+        with use_user(owner_sub):  # la app corre con la conexión del dueño
+            res = await call_owner_tool(provider, tool, args)
     except ConnectorError as exc:
         await log_event("connector.call", status="error", app_id=app_id, provider=provider,
                         message=f"{provider}:{tool} — {exc}"[:240])
@@ -887,13 +994,16 @@ async def dashboard_data(
         raise HTTPException(status_code=404, detail="Este dashboard no está configurado.")
 
     from .connectors import sheets as sheets_api
+    from .mcp.connstore import sub_for_email, use_user
 
+    owner_sub = await sub_for_email(session, app_project.owner_email if app_project else None)
     rng = cfg.get("range") or ""
     try:
-        if not rng:
-            meta = await sheets_api.metadata(cfg["spreadsheet_id"])
-            rng = meta["sheets"][0]["title"] if meta["sheets"] else "Sheet1"
-        rows = await sheets_api.read_range(cfg["spreadsheet_id"], rng)
+        with use_user(owner_sub):  # se lee con la Sheet del DUEÑO
+            if not rng:
+                meta = await sheets_api.metadata(cfg["spreadsheet_id"])
+                rng = meta["sheets"][0]["title"] if meta["sheets"] else "Sheet1"
+            rows = await sheets_api.read_range(cfg["spreadsheet_id"], rng)
     except sheets_api.NotConnected:
         raise HTTPException(status_code=409, detail="Google Sheets no está conectado en el builder.")
     except Exception as exc:  # noqa: BLE001
@@ -1151,6 +1261,89 @@ def _require_admin(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Solo administradores")
 
 
+async def _is_admin_db(session: AsyncSession, email: str | None) -> bool:
+    """Admin = correo en ADMIN_EMAILS (env, bootstrap) o `users.role == 'admin'` (DB).
+    La DB es la fuente de verdad en runtime: una degradación aplica de inmediato (no espera
+    a que expire el JWT)."""
+    if settings.is_admin(email):
+        return True
+    norm = (email or "").strip().lower()
+    if not norm:
+        return False
+    u = await session.get(User, norm)
+    return bool(u and u.role == "admin")
+
+
+async def _require_admin_db(request: Request, session: AsyncSession) -> str:
+    """403 si el usuario no es admin (chequeo contra DB). Devuelve el email normalizado."""
+    email = (_req_email(request) or "").strip().lower()
+    if not await _is_admin_db(session, email):
+        raise HTTPException(status_code=403, detail="Solo administradores")
+    return email
+
+
+async def _app_role(
+    session: AsyncSession, request: Request, ap: AppProject
+) -> str | None:
+    """Rol del solicitante sobre la app: admin | owner | editor | viewer, o None si sin acceso."""
+    email = (_req_email(request) or "").strip().lower()
+    if await _is_admin_db(session, email):
+        return "admin"
+    if not email:
+        return None
+    if email == (ap.owner_email or "").strip().lower():
+        return "owner"
+    shared = [e.strip().lower() for e in (ap.shared_emails or [])]
+    if email not in shared:
+        return None
+    editors = [e.strip().lower() for e in (ap.editor_emails or [])]
+    return "editor" if email in editors else "viewer"
+
+
+async def _app_for_request(
+    session: AsyncSession, request: Request, app_id: str
+) -> AppProject:
+    """Acceso de LECTURA: admin / owner / editor / viewer (cualquiera con acceso). 404/403 si no."""
+    ap = await session.get(AppProject, app_id)
+    if ap is None:
+        raise HTTPException(status_code=404, detail="App no encontrada")
+    if await _app_role(session, request, ap) is None:
+        raise HTTPException(status_code=403, detail="Sin acceso a esta app")
+    return ap
+
+
+async def _app_require_edit(
+    session: AsyncSession, request: Request, app_id: str
+) -> AppProject:
+    """Permiso de EDICIÓN (desplegar/editar): admin / owner / editor. Viewers → 403."""
+    ap = await session.get(AppProject, app_id)
+    if ap is None:
+        raise HTTPException(status_code=404, detail="App no encontrada")
+    role = await _app_role(session, request, ap)
+    if role in ("admin", "owner", "editor"):
+        return ap
+    if role is None:
+        raise HTTPException(status_code=403, detail="Sin acceso a esta app")
+    raise HTTPException(status_code=403, detail="Necesitas permiso de edición sobre esta app")
+
+
+async def _app_require_owner(
+    session: AsyncSession, request: Request, app_id: str
+) -> AppProject:
+    """Acciones reservadas (eliminar / gestionar compartidos): solo admin u owner."""
+    ap = await session.get(AppProject, app_id)
+    if ap is None:
+        raise HTTPException(status_code=404, detail="App no encontrada")
+    role = await _app_role(session, request, ap)
+    if role in ("admin", "owner"):
+        return ap
+    if role is None:
+        raise HTTPException(status_code=403, detail="Sin acceso a esta app")
+    raise HTTPException(
+        status_code=403, detail="Solo el dueño o un admin pueden hacer esto"
+    )
+
+
 def _parse_dt(s: str, end: bool = False):
     try:
         if len(s) == 10:  # YYYY-MM-DD -> abarca todo el día
@@ -1176,7 +1369,7 @@ async def list_logs(
     session: AsyncSession = Depends(get_session),
 ):
     """Bitácora de eventos (rol admin). Filtros: tipo, estado, usuario, app, texto y rango."""
-    _require_admin(request)
+    await _require_admin_db(request, session)
     conds = []
     if type:
         conds.append(EventLog.event_type == type)
@@ -1228,7 +1421,7 @@ async def list_logs(
 @app.get("/api/logs/facets")
 async def log_facets(request: Request, session: AsyncSession = Depends(get_session)):
     """Valores distintos para poblar los filtros del panel de Logs."""
-    _require_admin(request)
+    await _require_admin_db(request, session)
 
     async def distinct(col):
         return [v for v in (await session.execute(select(col).distinct())).scalars().all() if v]
@@ -1238,6 +1431,117 @@ async def log_facets(request: Request, session: AsyncSession = Depends(get_sessi
         "statuses": sorted(await distinct(EventLog.status)),
         "users": sorted(await distinct(EventLog.user_email)),
     }
+
+
+# ===================== Sesión actual + gestión de usuarios (admin) =====================
+
+@app.get("/api/me")
+async def whoami(request: Request, session: AsyncSession = Depends(get_session)):
+    """Datos de la sesión con el rol FRESCO desde DB (el front refresca la nav sin re-login)."""
+    user = getattr(request.state, "user", None) or {}
+    email = (_req_email(request) or "").strip().lower()
+    is_admin = await _is_admin_db(session, email)
+    return {
+        "email": user.get("email"),
+        "name": user.get("name"),
+        "picture": user.get("picture"),
+        "is_admin": is_admin,
+        "role": "admin" if is_admin else "member",
+    }
+
+
+@app.get("/api/users")
+async def list_users(
+    request: Request,
+    q: str = "",
+    limit: int = 50,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_session),
+):
+    """Lista paginada de usuarios con su rol y nº de apps (solo admin). Escala a 10k+."""
+    await _require_admin_db(request, session)
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+
+    base = select(User)
+    if q.strip():
+        like = f"%{q.strip()}%"
+        base = base.where(or_(User.email.ilike(like), User.name.ilike(like)))
+
+    total = (
+        await session.execute(select(func.count()).select_from(base.subquery()))
+    ).scalar() or 0
+    admins = (
+        await session.execute(
+            select(func.count()).select_from(User).where(User.role == "admin")
+        )
+    ).scalar() or 0
+    users = (
+        await session.execute(base.order_by(User.email).limit(limit).offset(offset))
+    ).scalars().all()
+
+    # Conteo de apps por dueño SOLO de los usuarios de esta página (no escanea todo).
+    emails = [u.email for u in users]
+    counts: dict[str, int] = {}
+    if emails:
+        counts = dict(
+            (
+                await session.execute(
+                    select(AppProject.owner_email, func.count())
+                    .where(AppProject.owner_email.in_(emails))
+                    .group_by(AppProject.owner_email)
+                )
+            ).all()
+        )
+    env_admins = set(settings.admin_email_list)
+    return {
+        "items": [
+            {
+                "email": u.email,
+                "name": u.name,
+                "picture": u.picture,
+                "role": u.role,
+                "is_env_admin": u.email in env_admins,
+                "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+                "apps_count": int(counts.get(u.email, 0) or 0),
+            }
+            for u in users
+        ],
+        "total": total,
+        "admins": admins,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.put("/api/users/{email}/role")
+async def set_user_role(
+    email: str, body: dict, request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Cambia el rol de un usuario (admin|member). Lo único que se bloquea es degradar a un
+    admin permanente (correo en ADMIN_EMAILS): es el salvavidas que evita quedarse sin admins,
+    porque esos correos siempre vuelven a ser admin al iniciar sesión (bootstrap). Por eso SÍ
+    se permite que un admin (incluido uno mismo) baje a member: la recuperación está garantizada."""
+    me = await _require_admin_db(request, session)
+    role = (body or {}).get("role", "").strip().lower()
+    if role not in ("admin", "member"):
+        raise HTTPException(status_code=400, detail="Rol inválido (admin|member).")
+    target = email.strip().lower()
+    u = await session.get(User, target)
+    if u is None:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    if role == "member" and settings.admin_email_list and target in settings.admin_email_list:
+        raise HTTPException(
+            status_code=400, detail="Ese correo es admin permanente (ADMIN_EMAILS)."
+        )
+    u.role = role
+    await session.commit()
+    await log_event(
+        "user.role", status="info", user_email=me,
+        message=f"Rol de {target} → {role}", meta={"target": target, "role": role},
+    )
+    return {"email": u.email, "role": u.role}
 
 
 @app.get("/auth/google/login")
@@ -1267,7 +1571,10 @@ async def google_login(return_to: str = Query("/", alias="return_to")):
 
 
 @app.get("/auth/google/callback")
-async def google_callback(state: str = "", code: str = "", error: str = ""):
+async def google_callback(
+    state: str = "", code: str = "", error: str = "",
+    session: AsyncSession = Depends(get_session),
+):
     if error:
         return HTMLResponse(f"<p>Login cancelado: {error}</p>", status_code=400)
     entry = _login_states.pop(state, None)
@@ -1301,13 +1608,31 @@ async def google_callback(state: str = "", code: str = "", error: str = ""):
         return HTMLResponse(f"<p>Error de login: {exc}</p>", status_code=400)
 
     email = info.get("email")
+    # Upsert del usuario (alta en primer login + actualización de perfil/last_login). Los correos
+    # en ADMIN_EMAILS (env) son admin permanente: se fuerzan a admin acá (bootstrap, no degradables).
+    norm_email = (email or "").strip().lower()
+    is_admin = False
+    if norm_email:
+        u = await session.get(User, norm_email)
+        env_admin = settings.is_admin(email)
+        if u is None:
+            u = User(email=norm_email, role="admin" if env_admin else "member")
+            session.add(u)
+        u.sub = info.get("sub")
+        u.name = info.get("name")
+        u.picture = info.get("picture")
+        u.last_login_at = datetime.now(timezone.utc)
+        if env_admin:
+            u.role = "admin"
+        await session.commit()
+        is_admin = u.role == "admin"
     session_jwt = encode_jwt(
         {
             "sub": info.get("sub"),
             "email": email,
             "name": info.get("name"),
             "picture": info.get("picture"),
-            "is_admin": settings.is_admin(email),
+            "is_admin": is_admin,
         },
         settings.session_secret,
     )
@@ -1325,11 +1650,24 @@ _mcp_states: dict[str, dict] = {}
 
 
 @app.get("/api/mcp/connections")
-async def mcp_connections(session: AsyncSession = Depends(get_session)):
+async def mcp_connections(
+    request: Request, session: AsyncSession = Depends(get_session)
+):
     from .mcp.catalog import catalog_list
 
-    oauth_connected = set(
-        (await session.execute(select(McpConnection.provider))).scalars().all()
+    # Estado de conexión SOLO del usuario actual (conectores por-usuario).
+    user = getattr(request.state, "user", None) or {}
+    sub = user.get("sub") if isinstance(user, dict) else None
+    oauth_connected = (
+        set(
+            (
+                await session.execute(
+                    select(McpConnection.provider).where(McpConnection.user_sub == sub)
+                )
+            ).scalars().all()
+        )
+        if sub
+        else set()
     )
     out = []
     for s in catalog_list():
@@ -1356,12 +1694,18 @@ async def mcp_connections(session: AsyncSession = Depends(get_session)):
 
 
 @app.get("/api/mcp/{provider}/connect")
-async def mcp_connect(provider: str, token: str = ""):
+async def mcp_connect(
+    provider: str, token: str = "", session: AsyncSession = Depends(get_session)
+):
     from .mcp.catalog import load_catalog
 
-    # Popup de OAuth (navegación, sin header): el token viaja por query para atribuir el
-    # evento mcp.connect al usuario en la bitácora.
-    connect_email = (decode_jwt(token, settings.session_secret) or {}).get("email") if token else None
+    # Popup de OAuth (navegación, sin header): el token viaja por query para identificar al
+    # usuario que conecta. La conexión es POR-USUARIO → guardamos su sub/email en el state.
+    claims = (decode_jwt(token, settings.session_secret) or {}) if token else {}
+    connect_email = claims.get("email")
+    connect_sub = claims.get("sub")
+    if not connect_sub:
+        raise HTTPException(status_code=401, detail="Sesión inválida para conectar.")
     spec = load_catalog().get(provider)
 
     # OAuth estándar (broker): self-hosted con auth oauth (Slack, etc.) -> user token.
@@ -1377,7 +1721,8 @@ async def mcp_connect(provider: str, token: str = ""):
             _mcp_states.pop(k, None)
         state = secrets.token_urlsafe(24)
         _mcp_states[state] = {
-            "provider": provider, "std_oauth": True, "ts": now, "user_email": connect_email,
+            "provider": provider, "std_oauth": True, "ts": now,
+            "user_email": connect_email, "user_sub": connect_sub,
         }
         redirect_uri = f"{settings.public_base_url}/api/mcp/oauth/callback"
         return RedirectResponse(build_authorize_url(prov, redirect_uri, state))
@@ -1420,6 +1765,7 @@ async def mcp_connect(provider: str, token: str = ""):
         "resource": server_url,
         "ts": now,
         "user_email": connect_email,
+        "user_sub": connect_sub,
     }
     params = {
         "response_type": "code",
@@ -1513,12 +1859,18 @@ async def mcp_oauth_callback(
         except Exception as exc:  # noqa: BLE001
             return _popup_html(f"OAuth de {spec.label}: {exc}", ok=False)
 
+    st_sub = st.get("user_sub")
     existing = (
         await session.execute(
-            select(McpConnection).where(McpConnection.provider == st["provider"])
+            select(McpConnection).where(
+                McpConnection.provider == st["provider"],
+                McpConnection.user_sub == st_sub,
+            )
         )
     ).scalar_one_or_none()
     fields = dict(
+        user_sub=st_sub,
+        user_email=st.get("user_email"),
         access_token=encrypt(access),
         # Guardamos refresh + cliente para refrescar (Sheets API directa; conector hosted).
         refresh_token=encrypt(token["refresh_token"]) if token.get("refresh_token") else
@@ -1545,7 +1897,7 @@ async def mcp_oauth_callback(
         try:
             from .mcp.pool import ensure_server
 
-            await ensure_server(spec, {k: str(v) for k, v in env.items()})
+            await ensure_server(spec, {k: str(v) for k, v in env.items()}, st.get("user_sub"))
         except Exception:  # noqa: BLE001
             pass
     # Invalida el cache de tools puenteadas para que el agente vea el cambio enseguida.
@@ -1578,12 +1930,18 @@ async def mcp_callback(
     if not access_token:
         return _popup_html("El MCP no devolvió access_token.", ok=False)
 
+    st_sub = st.get("user_sub")
     existing = (
         await session.execute(
-            select(McpConnection).where(McpConnection.provider == st["provider"])
+            select(McpConnection).where(
+                McpConnection.provider == st["provider"],
+                McpConnection.user_sub == st_sub,
+            )
         )
     ).scalar_one_or_none()
     fields = dict(
+        user_sub=st_sub,
+        user_email=st.get("user_email"),
         access_token=encrypt(access_token),
         refresh_token=encrypt(token.get("refresh_token")),
         client_id=st["client_id"],
@@ -1609,17 +1967,26 @@ async def mcp_callback(
 async def mcp_disconnect(
     provider: str, request: Request, session: AsyncSession = Depends(get_session)
 ):
-    await session.execute(delete(McpConnection).where(McpConnection.provider == provider))
+    # Conector POR-USUARIO: cada quien desconecta SOLO el suyo (sin gate admin).
+    user = getattr(request.state, "user", None) or {}
+    sub = user.get("sub") if isinstance(user, dict) else None
+    if not sub:
+        raise HTTPException(status_code=401, detail="Sesión requerida.")
+    await session.execute(
+        delete(McpConnection).where(
+            McpConnection.provider == provider, McpConnection.user_sub == sub
+        )
+    )
     await session.commit()
     await log_event(
         "mcp.disconnect", user_email=_req_email(request), provider=provider,
         message=f"MCP desconectado: {provider}",
     )
-    # Reapea el contenedor MCP por-usuario (si era self-hosted oauth).
+    # Reapea el contenedor MCP de ESTE usuario (si era self-hosted oauth).
     try:
         from .mcp.pool import remove_server
 
-        await remove_server(provider)
+        await remove_server(provider, sub)
     except Exception:  # noqa: BLE001
         pass
     from .mcp import bridge as mcp_bridge

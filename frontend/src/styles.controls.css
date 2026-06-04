@@ -1,4 +1,4 @@
-/* ===== Tema Cashea Hub: Inter + amarillo + pills ===== */
+/* ===== Tema Cashea Hub: Plus Jakarta Sans + amarillo + pills ===== */
 :root {
   --brand: #fdfa3d;          /* amarillo de marca Cashea */
   --brand-strong: #ece92b;   /* hover */
@@ -7,7 +7,7 @@
   --bg: #fafafb;             /* fondo limpio (sin cuadrícula) */
 }
 body {
-  font-family: var(--font-sans);  /* Inter para toda la UI (no monospace) */
+  font-family: var(--font-sans);  /* Plus Jakarta Sans para toda la UI (no monospace) */
   font-size: var(--text-base);
   background: var(--bg);     /* plano, sin patrón */
 }
@@ -58,7 +58,11 @@ button {
   height: 100vh;
   width: 100vw;
   overflow: hidden;
-  background: var(--bg);
+  /* Patrón de puntos sutil pero visible en el fondo de toda la plataforma. */
+  background-color: var(--bg);
+  background-image: radial-gradient(rgba(29, 35, 48, 0.08) 1.2px, transparent 1.4px);
+  background-size: 22px 22px;
+  background-position: -6px -6px;
 }
 .platform-main {
   flex: 1;
@@ -823,8 +827,8 @@ button {
 }
 .page-head h1 {
   margin: 2px 0 0;
-  font-size: 1.6rem;
-  font-weight: 800;
+  font-size: 1.25rem;
+  font-weight: 700;
   letter-spacing: -0.01em;
 }
 .mcp-search {
@@ -887,19 +891,28 @@ button {
   background: #d9eaff;
 }
 
-/* MCP cards */
+/* ===== Connectors (cards) — minimalista ===== */
 .mcp-card {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   padding: 18px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  border-radius: 16px;
   background: var(--surface);
   box-shadow: var(--shadow-soft);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+.mcp-card:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
 }
 .mcp-card.connected {
-  border-color: rgba(19, 138, 87, 0.3);
+  border-color: rgba(19, 138, 87, 0.28);
+  background:
+    linear-gradient(180deg, rgba(19, 138, 87, 0.04), transparent 60%),
+    var(--surface);
 }
 .mcp-card-head {
   display: flex;
@@ -907,10 +920,10 @@ button {
   gap: 12px;
 }
 .mcp-card-icon {
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   border-radius: 11px;
-  background: #fff;
+  background: var(--surface-soft, #f5f6f8);
   border: 1px solid var(--line);
   display: flex;
   align-items: center;
@@ -923,7 +936,9 @@ button {
 }
 .mcp-card-head h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 .mcp-mono {
   width: 100%;
@@ -933,31 +948,32 @@ button {
   align-items: center;
   justify-content: center;
   color: #fff;
-  font-weight: 800;
-  font-size: 1.05rem;
+  font-weight: 700;
+  font-size: 1rem;
   text-transform: uppercase;
 }
 .mcp-badge {
   flex: 0 0 auto;
-  font-size: 0.66rem;
+  align-self: flex-start;
+  font-size: 0.6rem;
   font-weight: 700;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  padding: 3px 8px;
-  border-radius: 999px;
+  padding: 2px 7px;
+  border-radius: 6px;
   border: 1px solid var(--line);
   color: var(--muted);
   background: var(--surface-soft, #f4f4f6);
 }
 .mcp-badge.mcp {
-  color: #15150a;
-  background: var(--brand);
-  border-color: var(--brand-strong, #ece92b);
+  color: #7a5c00;
+  background: var(--brand-soft, #fbf7be);
+  border-color: transparent;
 }
 .mcp-badge.api {
-  color: var(--accent-strong);
-  background: var(--accent-soft);
-  border-color: var(--accent-soft);
+  color: var(--muted-strong);
+  background: var(--surface-soft, #f4f4f6);
+  border-color: var(--line);
 }
 .mcp-hint {
   margin: 0;
@@ -965,9 +981,22 @@ button {
   color: var(--muted);
   line-height: 1.4;
 }
+/* Estado: punto + texto sutil (no bold). */
 .mcp-state {
-  font-size: 0.78rem;
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+.mcp-state::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 .mcp-state.on {
   color: var(--ok);
@@ -982,6 +1011,35 @@ button {
   color: var(--muted);
   font-size: 0.74rem;
   font-weight: 600;
+}
+
+/* Botones de la card: calmos en reposo, acento Cashea al interactuar (sin azul fuerte). */
+.mcp-card .btn {
+  width: 100%;
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.mcp-card .btn.primary {
+  background: var(--surface-soft, #f4f4f6);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+.mcp-card .btn.primary:hover {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--on-accent);
+}
+.mcp-card .btn.ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted-strong);
+}
+.mcp-card .btn.ghost:hover {
+  background: var(--surface-soft, #f4f4f6);
+  color: var(--text);
 }
 
 /* Apps */
@@ -1052,9 +1110,9 @@ button {
 }
 .hub-head h1 {
   margin: 0;
-  font-size: 1.9rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 .hub-count {
   margin: 4px 0 0;
@@ -1178,7 +1236,7 @@ button {
 }
 .hub-row {
   display: grid;
-  grid-template-columns: 2.4fr 1fr 1fr 80px;
+  grid-template-columns: 2.4fr 1fr 1fr 156px;
   align-items: center;
   gap: 12px;
   padding: 14px 20px;
@@ -1248,7 +1306,7 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-weight: 700;
+  font-weight: 600;
   min-width: 0;
 }
 .hub-title-text {
@@ -1256,6 +1314,37 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  font-size: 0.9rem;
+}
+.hub-name-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+/* Dueño de la app (solo lo ve el admin): línea sutil bajo el título. */
+.hub-owner {
+  font-size: 0.72rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hub-owner-filter {
+  min-width: 180px;
+}
+/* Tag de app compartida (la veo pero no es mía). */
+.hub-shared-tag {
+  flex: 0 0 auto;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--accent-strong, #075fbe);
+  background: var(--accent-soft, #e7f1ff);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
 }
 .hub-name-edit {
   flex: 0 0 auto;
@@ -1460,6 +1549,7 @@ button {
   position: relative;
 }
 .hub-open {
+  flex: 0 0 auto;
   width: 32px;
   height: 32px;
   display: grid;
@@ -1469,6 +1559,33 @@ button {
   color: var(--on-accent);
 }
 .hub-open svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* Acciones primarias como íconos ghost (editar, desplegar): minimalistas, hover sutil. */
+.hub-act {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.hub-act:hover {
+  background: var(--surface-soft);
+  color: var(--text);
+}
+.hub-act svg {
   width: 15px;
   height: 15px;
   fill: none;
@@ -1511,18 +1628,48 @@ button {
   stroke-linejoin: round;
 }
 .hub-kebab {
+  flex: 0 0 auto;
   width: 32px;
   height: 32px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--muted-strong);
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
   cursor: pointer;
   font-size: 1.1rem;
   line-height: 1;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 .hub-kebab:hover {
   background: var(--surface-soft);
+  color: var(--text);
+}
+.hub-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+}
+.hub-more-btn {
+  height: 36px;
+  padding: 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted-strong);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.hub-more-btn:hover:not(:disabled) {
+  background: var(--surface-soft);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.hub-more-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 .hub-menu-backdrop {
   position: fixed;
@@ -1759,15 +1906,15 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 34px;
-  padding: 0 11px;
+  height: 32px;
+  padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
   cursor: pointer;
-  font-size: 0.82rem;
-  font-weight: 700;
+  font-size: 0.8rem;
+  font-weight: 600;
 }
 .model-dd-trigger:hover:not(:disabled) {
   border-color: var(--line-strong);
@@ -2237,16 +2384,16 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  height: 34px;
-  padding: 0 14px;
-  border: none;
+  height: 32px;
+  padding: 0 13px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: var(--accent);
   color: #fff;
-  font-size: 0.82rem;
-  font-weight: 700;
+  font-size: 0.8rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.05s ease;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.05s ease;
 }
 .deploy-btn:hover {
   background: var(--accent-strong);
@@ -2254,16 +2401,27 @@ button {
 .deploy-btn:active {
   transform: scale(0.97);
 }
+/* Ghost (Redesplegar): solo texto + ícono, sin borde; hover sutil. */
 .deploy-btn.ghost {
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
-  color: var(--muted-strong);
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
 }
 .deploy-btn.ghost:hover {
   background: var(--surface-soft);
+  color: var(--text);
 }
 .deploy-btn.danger {
   background: var(--err);
+}
+.deploy-ic {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .deploy-rocket::before {
   content: "🚀";
@@ -2274,13 +2432,13 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 34px;
-  padding: 0 14px;
+  height: 32px;
+  padding: 0 13px;
   border-radius: var(--radius-sm);
   background: rgba(240, 161, 26, 0.12);
   color: #9a6a08;
-  font-size: 0.82rem;
-  font-weight: 700;
+  font-size: 0.8rem;
+  font-weight: 600;
 }
 .deploy-spinner {
   width: 13px;
@@ -2296,33 +2454,54 @@ button {
   }
 }
 
+/* Chip de subdominio: sutil (texto gris + punto verde "live" + ícono de link). */
 .deploy-link {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  height: 34px;
-  padding: 0 12px;
-  border: 1px solid rgba(19, 138, 87, 0.3);
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: var(--ok-soft);
-  color: var(--ok);
-  font-size: 0.82rem;
-  font-weight: 700;
+  background: transparent;
+  color: var(--muted-strong);
+  font-size: 0.8rem;
+  font-weight: 600;
   text-decoration: none;
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-width: 260px;
   white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 .deploy-link:hover {
-  text-decoration: underline;
+  background: var(--surface-soft);
+  color: var(--text);
+  text-decoration: none;
+}
+.deploy-host {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .deploy-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-soft);
   flex: 0 0 auto;
+}
+.deploy-ext {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.55;
+}
+.deploy-link:hover .deploy-ext {
+  opacity: 0.9;
 }
 
 /* ===== Barra de conectores (OAuth) ===== */
@@ -2516,7 +2695,10 @@ button {
 .sidebar {
   padding: 18px 12px;
   gap: 3px;
-  background: #ffffff;
+  background-color: #ffffff;
+  background-image: radial-gradient(rgba(29, 35, 48, 0.06) 1.2px, transparent 1.4px);
+  background-size: 22px 22px;
+  background-position: -6px -6px;
   color: var(--text);
   border-right: 1px solid var(--line);
   overflow: visible; /* deja escapar los tooltips del sidebar colapsado */
@@ -2751,6 +2933,58 @@ button {
   transform: translateX(-50%) rotate(45deg);
 }
 
+/* Arriba + anclado a la DERECHA: para los íconos del extremo derecho de una fila (p. ej.
+   las acciones de Apps), donde el tooltip centrado se saldría por el borde derecho. */
+.tip-top.tip-end::after {
+  left: auto;
+  right: 0;
+  transform: translateX(0) translateY(4px);
+}
+.tip-top.tip-end:hover::after,
+.tip-top.tip-end:focus-visible::after {
+  transform: translateX(0) translateY(0);
+}
+.tip-top.tip-end::before {
+  left: auto;
+  right: 12px;
+  transform: translateX(0) rotate(45deg);
+}
+
+/* Abajo: para controles pegados al borde SUPERIOR (header del chat), donde el tooltip
+   hacia arriba se saldría del viewport y se cortaría. */
+.tip-bottom::after {
+  top: calc(100% + 11px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+}
+.tip-bottom:hover::after,
+.tip-bottom:focus-visible::after {
+  transform: translateX(-50%) translateY(0);
+}
+.tip-bottom::before {
+  top: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+/* Anclado al borde DERECHO: para controles del extremo derecho del header, donde la caja
+   centrada se saldría del viewport. La caja crece hacia la izquierda; la flecha queda en
+   el botón. */
+.tip-bottom.tip-end::after {
+  left: auto;
+  right: 0;
+  transform: translateX(0) translateY(-4px);
+}
+.tip-bottom.tip-end:hover::after,
+.tip-bottom.tip-end:focus-visible::after {
+  transform: translateX(0) translateY(0);
+}
+.tip-bottom.tip-end::before {
+  left: auto;
+  right: 12px;
+  transform: translateX(0) rotate(45deg);
+}
+
 /* Variante anclada a la izquierda: para botones pegados al borde izquierdo (p. ej. el
    clip de adjuntar). Evita que el tooltip se salga del panel y lo recorte overflow:hidden.
    La caja crece hacia la derecha desde el botón; la flecha sigue centrada en el botón. */
@@ -2852,12 +3086,41 @@ button {
   outline: none;
   border-color: var(--brand-strong, #ece92b);
 }
+.share-add-role {
+  flex: 0 0 auto;
+  min-width: 130px;
+}
 .share-list {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   min-height: 36px;
   margin-bottom: 8px;
+}
+.share-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-soft, #f4f4f6);
+}
+.share-item-email {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.84rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-item-role {
+  flex: 0 0 auto;
+  min-width: 124px;
+}
+.share-item.is-owner {
+  background: var(--brand-soft, #fff6d6);
+  border-color: var(--brand, #ffd200);
 }
 .share-chip {
   display: inline-flex;
@@ -3257,20 +3520,20 @@ button {
   max-width: 50%;
 }
 .chat-config-btn {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--surface);
-  color: var(--muted-strong);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 .chat-config-btn:hover {
   background: var(--surface-soft);
-  border-color: var(--line-strong);
+  color: var(--text);
 }
 .chat-config-btn svg {
   width: 18px;
@@ -3447,4 +3710,200 @@ textarea.spec-input {
 }
 .typing-row .typing {
   margin-left: 0;
+}
+
+/* ===== Gestión de usuarios (admin) ===== */
+.page-sub {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+.users-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 14px;
+}
+.users-search {
+  flex: 1;
+  max-width: 360px;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.88rem;
+}
+.users-search:focus {
+  outline: none;
+  border-color: var(--line-strong);
+}
+.users-count {
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.users-error {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--err-soft);
+  color: var(--err);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.users-table {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+.users-row {
+  display: grid;
+  grid-template-columns: 2.6fr 56px 1fr 168px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.users-row:last-child {
+  border-bottom: none;
+}
+.users-row-head {
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.users-user {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.users-avatar {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--brand-soft);
+  color: var(--on-accent);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+.users-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.users-id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.users-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.users-you {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 2px 6px;
+}
+.users-email {
+  font-size: 0.76rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.users-apps {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-strong);
+  font-weight: 600;
+}
+.users-last {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.users-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: var(--surface-soft);
+  color: var(--muted-strong);
+}
+.users-badge.admin {
+  background: var(--brand-soft);
+  color: var(--on-accent);
+}
+.users-fixed {
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+/* Toggle segmentado de rol (Miembro | Admin) — minimalista, sin overflow de dropdown. */
+.role-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+}
+.role-seg button {
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  padding: 5px 13px;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.role-seg button:hover:not(.active) {
+  color: var(--text);
+}
+.role-seg button.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-soft);
+}
+.role-seg button.admin.active {
+  background: var(--brand);
+  color: var(--on-accent);
+}
+.role-seg.is-saving {
+  opacity: 0.55;
+  pointer-events: none;
 }

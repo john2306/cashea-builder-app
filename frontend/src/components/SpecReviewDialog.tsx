@@ -133,12 +133,12 @@ export function SpecReviewDialog({
       });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
-        throw new Error(d.detail || "No se pudo guardar la configuración.");
+        throw new Error(d.detail || "Could not save the settings.");
       }
       onSaved?.();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error al guardar.");
+      setError(e instanceof Error ? e.message : "Error saving.");
     } finally {
       setSaving(false);
     }
@@ -156,31 +156,31 @@ export function SpecReviewDialog({
       >
         <header className="spec-drawer-head">
           <div className="spec-drawer-titles">
-            <p className="eyebrow">Configuración de la app</p>
+            <p className="eyebrow">App settings</p>
             <h3>{appTitle}</h3>
           </div>
-          <button className="spec-drawer-x" type="button" onClick={onClose} aria-label="Cerrar">✕</button>
+          <button className="spec-drawer-x" type="button" onClick={onClose} aria-label="Close">✕</button>
         </header>
 
         <div className="spec-drawer-body">
         {loading ? (
-          <p className="muted-note">Cargando…</p>
+          <p className="muted-note">Loading…</p>
         ) : !spec ? (
           <p className="spec-empty">
-            Esta app no tiene una configuración editable (p. ej. un dashboard). Editá su
-            comportamiento desde el chat del Builder.
+            This app has no editable settings (e.g. a dashboard). Edit its
+            behavior from the Builder chat.
           </p>
         ) : (
           <div className="spec-body">
             {/* General */}
             <section className="spec-sec">
-              <label className="spec-label">Nombre</label>
+              <label className="spec-label">Name</label>
               <input
                 className="spec-input"
                 value={spec.name}
                 onChange={(e) => patch({ name: e.target.value })}
               />
-              <label className="spec-label">Descripción</label>
+              <label className="spec-label">Description</label>
               <textarea
                 className="spec-input"
                 rows={2}
@@ -192,15 +192,15 @@ export function SpecReviewDialog({
             {/* Entidades */}
             <section className="spec-sec">
               <div className="spec-sec-head">
-                <h4>Entidades</h4>
-                <button className="spec-add" type="button" onClick={addEntity}>+ Entidad</button>
+                <h4>Entities</h4>
+                <button className="spec-add" type="button" onClick={addEntity}>+ Entity</button>
               </div>
               {spec.entities.map((e, i) => (
                 <div className="spec-card" key={i}>
                   <div className="spec-row">
                     <input
                       className="spec-input"
-                      placeholder="Nombre"
+                      placeholder="Name"
                       value={e.name}
                       onChange={(ev) => setEntity(i, { name: ev.target.value })}
                     />
@@ -210,14 +210,14 @@ export function SpecReviewDialog({
                       onChange={(ev) => setEntity(i, { source: ev.target.value })}
                     >
                       {SOURCES.map((s) => (
-                        <option key={s} value={s}>{s || "(fuente)"}</option>
+                        <option key={s} value={s}>{s || "(source)"}</option>
                       ))}
                     </select>
                     <button className="spec-del" type="button" onClick={() => delEntity(i)}>✕</button>
                   </div>
                   <input
                     className="spec-input"
-                    placeholder="location (id de Sheet, proyecto.dataset.tabla, …)"
+                    placeholder="location (Sheet id, project.dataset.table, …)"
                     value={e.location}
                     onChange={(ev) => setEntity(i, { location: ev.target.value })}
                   />
@@ -226,7 +226,7 @@ export function SpecReviewDialog({
                       <div className="spec-row spec-field-row" key={fi}>
                         <input
                           className="spec-input"
-                          placeholder="campo"
+                          placeholder="field"
                           value={f.name}
                           onChange={(ev) => setField(i, fi, { name: ev.target.value })}
                         />
@@ -240,7 +240,7 @@ export function SpecReviewDialog({
                         <button className="spec-del" type="button" onClick={() => delField(i, fi)}>✕</button>
                       </div>
                     ))}
-                    <button className="spec-add sm" type="button" onClick={() => addField(i)}>+ campo</button>
+                    <button className="spec-add sm" type="button" onClick={() => addField(i)}>+ field</button>
                   </div>
                 </div>
               ))}
@@ -249,15 +249,15 @@ export function SpecReviewDialog({
             {/* Pantallas */}
             <section className="spec-sec">
               <div className="spec-sec-head">
-                <h4>Pantallas</h4>
-                <button className="spec-add" type="button" onClick={addScreen}>+ Pantalla</button>
+                <h4>Screens</h4>
+                <button className="spec-add" type="button" onClick={addScreen}>+ Screen</button>
               </div>
               {spec.screens.map((s, i) => (
                 <div className="spec-card" key={i}>
                   <div className="spec-row">
                     <input
                       className="spec-input"
-                      placeholder="Nombre"
+                      placeholder="Name"
                       value={s.name}
                       onChange={(ev) => setScreen(i, { name: ev.target.value })}
                     />
@@ -273,7 +273,7 @@ export function SpecReviewDialog({
                       value={s.entity}
                       onChange={(ev) => setScreen(i, { entity: ev.target.value })}
                     >
-                      <option value="">(entidad)</option>
+                      <option value="">(entity)</option>
                       {entityNames.map((n) => <option key={n} value={n}>{n}</option>)}
                     </select>
                     <button className="spec-del" type="button" onClick={() => delScreen(i)}>✕</button>
@@ -297,15 +297,15 @@ export function SpecReviewDialog({
             {/* Tareas programadas */}
             <section className="spec-sec">
               <div className="spec-sec-head">
-                <h4>Tareas programadas</h4>
-                <button className="spec-add" type="button" onClick={addJob}>+ Tarea</button>
+                <h4>Scheduled jobs</h4>
+                <button className="spec-add" type="button" onClick={addJob}>+ Job</button>
               </div>
               {spec.jobs.map((j, i) => (
                 <div className="spec-card" key={i}>
                   <div className="spec-row">
                     <input
                       className="spec-input"
-                      placeholder="Nombre"
+                      placeholder="Name"
                       value={j.name}
                       onChange={(ev) => setJob(i, { name: ev.target.value })}
                     />
@@ -319,7 +319,7 @@ export function SpecReviewDialog({
                   </div>
                   <input
                     className="spec-input"
-                    placeholder="Descripción"
+                    placeholder="Description"
                     value={j.description}
                     onChange={(ev) => setJob(i, { description: ev.target.value })}
                   />
@@ -329,7 +329,7 @@ export function SpecReviewDialog({
 
             {/* Fuentes / notificaciones */}
             <section className="spec-sec">
-              <label className="spec-label">Fuentes de datos</label>
+              <label className="spec-label">Data sources</label>
               <div className="spec-chips">
                 {SOURCES.filter(Boolean).map((s) => (
                   <button
@@ -342,7 +342,7 @@ export function SpecReviewDialog({
                   </button>
                 ))}
               </div>
-              <label className="spec-label">Notificaciones</label>
+              <label className="spec-label">Notifications</label>
               <div className="spec-chips">
                 {["slack", "notion", "gmail"].map((s) => (
                   <button
@@ -363,7 +363,7 @@ export function SpecReviewDialog({
         <footer className="spec-drawer-foot">
           {error && <p className="deploy-hint taken spec-drawer-err">{error}</p>}
           <button className="modal-btn ghost" type="button" onClick={onClose}>
-            Cerrar
+            Close
           </button>
           <button
             className="modal-btn primary"
@@ -371,7 +371,7 @@ export function SpecReviewDialog({
             onClick={save}
             disabled={saving || loading || !spec}
           >
-            {saving ? "Guardando…" : "Guardar cambios"}
+            {saving ? "Saving…" : "Save changes"}
           </button>
         </footer>
       </aside>

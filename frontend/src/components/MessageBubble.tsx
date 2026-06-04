@@ -40,7 +40,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
               aria-expanded={showThinking}
             >
               <Chevron open={showThinking} />
-              Razonamiento
+              Reasoning
             </button>
             {showThinking && <pre className="thinking-body">{message.thinking}</pre>}
           </div>
@@ -59,10 +59,10 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
 
         {message.usage && (
           <div className="usage">
-            {message.usage.output_tokens} tokens generados {" / "}
+            {message.usage.output_tokens} tokens generated {" / "}
             {message.usage.cache_read_input_tokens > 0
-              ? `${message.usage.cache_read_input_tokens} desde cache`
-              : "sin cache"}
+              ? `${message.usage.cache_read_input_tokens} from cache`
+              : "no cache"}
           </div>
         )}
       </div>

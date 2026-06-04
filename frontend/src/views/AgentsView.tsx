@@ -15,13 +15,13 @@ import { ModelSelect } from "../components/ModelSelect";
 import { useAgentSocket } from "../hooks/useAgentSocket";
 import { hydrateMessages } from "../lib/conversation";
 import { fileToAttachment } from "../lib/files";
-import { DEFAULT_MODEL } from "../lib/models";
+import { getStoredModel, setStoredModel } from "../lib/models";
 import type { AppProject, Attachment, ConversationDetail } from "../types";
 
 const SAMPLE_PROMPTS = [
-  "Clasifica mis correos y si dicen 'factura' procesa el adjunto y guarda en Sheets",
-  "Cuando me etiqueten en Slack, resume el hilo y créalo en Notion",
-  "Recibe un webhook, valida una condición y notifica por Slack",
+  "Classify my emails and if they say 'invoice' process the attachment and save it to Sheets",
+  "When I'm mentioned in Slack, summarize the thread and create it in Notion",
+  "Receive a webhook, check a condition and notify via Slack",
 ];
 
 function PaperclipIcon() {
@@ -65,7 +65,7 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
 export function AgentsView({ openAppId }: { openAppId?: string | null }) {
   const { messages, connected, running, appId, send, cancel, loadConversation } = useAgentSocket();
   const [input, setInput] = useState("");
-  const [model, setModel] = useState<string>(DEFAULT_MODEL);
+  const [model, setModel] = useState<string>(getStoredModel);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +87,8 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
   }, []);
 
   const refreshApps = useCallback(async () => {
-    const rows = await apiJson<AppProject[]>("/api/apps");
+    const page = await apiJson<{ items: AppProject[] }>("/api/apps?limit=100");
+    const rows = page.items ?? [];
     setApps(rows);
     return rows;
   }, []);
@@ -121,7 +122,7 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
   );
 
   const createApp = useCallback(async () => {
-    const title = input.trim() || "Nuevo agente";
+    const title = input.trim() || "New agent";
     const appProject = await apiJson<AppProject>("/api/apps", {
       method: "POST",
       body: JSON.stringify({ title }),
@@ -139,7 +140,7 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
 
   const renameApp = useCallback(
     (id: string, title: string) => {
-      persistApp(id, { title }).catch(() => setError("No se pudo renombrar el agente."));
+      persistApp(id, { title }).catch(() => setError("Could not rename the agent."));
     },
     [persistApp],
   );
@@ -150,7 +151,7 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
     try {
       setPendingDeploy(await ensureSelectedApp());
     } catch {
-      setError("No se pudo preparar el despliegue.");
+      setError("Could not prepare the deployment.");
     }
   }, [ensureSelectedApp]);
 
@@ -164,7 +165,7 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
           selectApp(rows[0].id);
         }
       })
-      .catch(() => setError("No se pudieron cargar los agentes."));
+      .catch(() => setError("Could not load the agents."));
   }, [refreshApps, selectApp, openAppId]);
 
   useEffect(() => {
@@ -227,7 +228,7 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
     const errors: string[] = [];
     for (const r of results) {
       if (r.status === "fulfilled") ok.push(r.value);
-      else errors.push(r.reason?.message ?? "Error al leer un archivo");
+      else errors.push(r.reason?.message ?? "Error reading a file");
     }
     if (ok.length) setAttachments((prev) => [...prev, ...ok]);
     if (errors.length) setError(errors.join(" "));
@@ -254,7 +255,7 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
     const named = files.map((f) =>
       f.name
         ? f
-        : new File([f], `pegado-${Date.now()}.${f.type.split("/")[1] || "png"}`, {
+        : new File([f], `pasted-${Date.now()}.${f.type.split("/")[1] || "png"}`, {
             type: f.type || "image/png",
           }),
     );
@@ -273,7 +274,7 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
   };
 
   const canSend = connected && !running && Boolean(input.trim() || attachments.length);
-  const appTitle = selectedApp?.title ?? "Nuevo agente";
+  const appTitle = selectedApp?.title ?? "New agent";
 
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
@@ -289,7 +290,7 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
 
   return (
     <div className="app-shell">
-      <section className="chat-panel" aria-label="Constructor de agentes">
+      <section className="chat-panel" aria-label="Agent builder">
         <header className="chat-header">
           <div className="chat-title">
             <p className="eyebrow">Builder Agent</p>
@@ -314,10 +315,10 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
                 {appTitle}
                 {selectedApp && (
                   <button
-                    className="app-name-edit tip tip-top"
+                    className="app-name-edit tip tip-bottom"
                     type="button"
-                    data-tooltip="Editar nombre"
-                    aria-label="Editar nombre"
+                    data-tooltip="Edit name"
+                    aria-label="Edit name"
                     onClick={startEditName}
                   >
                     <PencilIcon />
@@ -327,14 +328,21 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
             )}
           </div>
           <div className="chat-actions">
-            <ModelSelect value={model} onChange={setModel} disabled={running} />
+            <ModelSelect
+              value={model}
+              onChange={(m) => {
+                setModel(m);
+                setStoredModel(m);
+              }}
+              disabled={running}
+            />
             {selectedApp && (
               <button
-                className="chat-config-btn tip tip-top"
+                className="chat-config-btn tip tip-bottom"
                 type="button"
                 onClick={() => setPendingReview(selectedApp)}
-                data-tooltip="Configuración de la app"
-                aria-label="Configuración de la app"
+                data-tooltip="App settings"
+                aria-label="App settings"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M4 6h16M4 12h16M4 18h10" />
@@ -342,9 +350,12 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
               </button>
             )}
             <DeployControl app={selectedApp} onDeploy={openDeploy} />
-            <span className={`status-pill ${connected ? "online" : "offline"}`}>
-              {connected ? "Conectado" : "Reconectando..."}
-            </span>
+            <span
+              className={`status-dot tip tip-bottom tip-end ${connected ? "online" : "offline"}`}
+              data-tooltip={connected ? "Connected" : "Reconnecting…"}
+              role="status"
+              aria-label={connected ? "Connected" : "Reconnecting"}
+            />
           </div>
         </header>
 
@@ -366,8 +377,8 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
           {messages.length === 0 && (
             <div className="empty">
               <div className="empty-mark" aria-hidden="true" />
-              <h3>{"¿Qué agente construimos hoy?"}</h3>
-              <div className="prompt-grid" aria-label="Ideas rápidas">
+              <h3>{"What agent are we building today?"}</h3>
+              <div className="prompt-grid" aria-label="Quick ideas">
                 {SAMPLE_PROMPTS.map((prompt) => (
                   <button
                     className="prompt-chip"
@@ -387,17 +398,17 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
           {running && (
             <div className="bubble-row from-assistant typing-row">
               <div className="bubble-avatar assistant-avatar" aria-hidden="true" />
-              <span className="typing">{"El agente está trabajando…"}</span>
+              <span className="typing">{"The agent is working…"}</span>
             </div>
           )}
-          {dragging && <div className="drop-hint">{"Suelta los archivos aquí"}</div>}
+          {dragging && <div className="drop-hint">{"Drop the files here"}</div>}
           {showJump && (
             <button
               className="chat-jump"
               type="button"
               onClick={jumpToBottom}
-              aria-label="Ir al final"
-              title="Ir al final"
+              aria-label="Jump to bottom"
+              title="Jump to bottom"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M6 9l6 6 6-6" />
@@ -426,8 +437,8 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
               className="attach-btn tip tip-top tip-left"
               onClick={() => fileInputRef.current?.click()}
               disabled={!connected}
-              data-tooltip="Adjuntar archivos"
-              aria-label="Adjuntar archivos"
+              data-tooltip="Attach files"
+              aria-label="Attach files"
               type="button"
             >
               <PaperclipIcon />
@@ -444,18 +455,18 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
                 }
               }}
               onPaste={onPaste}
-              placeholder={`Describe el agente que quieres construir…`}
+              placeholder={`Describe the agent you want to build…`}
               rows={1}
               disabled={!connected}
             />
             {running ? (
               <button className="send-btn stop-btn" onClick={cancel} type="button">
-                <span>Detener</span>
+                <span>Stop</span>
                 <span className="stop-glyph" aria-hidden="true" />
               </button>
             ) : (
               <button className="send-btn" onClick={submit} disabled={!canSend} type="button">
-                <span>Enviar</span>
+                <span>Send</span>
                 <SendIcon />
               </button>
             )}

@@ -14,6 +14,7 @@ from . import oauth as mcp_oauth
 from ..core.crypto import decrypt, encrypt
 from ..core.db import SessionLocal
 from .catalog import catalog_list, load_catalog
+from .connstore import current_user_sub
 from ..core.models import McpConnection
 
 MCP_BETA = "mcp-client-2025-11-20"
@@ -40,8 +41,16 @@ async def active_mcp_servers() -> list[dict[str, str]]:
     servers: list[dict[str, str]] = []
     seen: set[str] = set()
 
+    sub = current_user_sub()
+    if not sub:
+        return []  # sin usuario vigente → ningún conector (aislamiento por-usuario)
+
     async with SessionLocal() as session:
-        rows = (await session.execute(select(McpConnection))).scalars().all()
+        rows = (
+            await session.execute(
+                select(McpConnection).where(McpConnection.user_sub == sub)
+            )
+        ).scalars().all()
         now = datetime.now(timezone.utc)
         for row in rows:
             spec = hosted.get(row.provider)

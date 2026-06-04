@@ -40,7 +40,7 @@ export function deriveIntegrations(messages: ChatMessage[]): AppIntegrations {
         id: svc.id,
         name: svc.label,
         label: svc.label,
-        meta: "Requiere autenticación",
+        meta: "Requires authentication",
         state: "pending",
       });
     }
@@ -49,7 +49,7 @@ export function deriveIntegrations(messages: ChatMessage[]): AppIntegrations {
   for (const message of messages) {
     for (const match of message.text.matchAll(URL_RE)) {
       const url = match[0];
-      apis.set(url, { id: url, url, label: url, meta: "Detectada en la conversación", state: "active" });
+      apis.set(url, { id: url, url, label: url, meta: "Detected in the conversation", state: "active" });
     }
 
     for (const tool of message.tools) {
@@ -57,16 +57,16 @@ export function deriveIntegrations(messages: ChatMessage[]): AppIntegrations {
         id: tool.name,
         name: tool.name,
         label: tool.name,
-        meta: tool.longRunning ? "Tarea larga" : "Tool call",
+        meta: tool.longRunning ? "Long task" : "Tool call",
         state: tool.isError ? "error" : tool.result ? "active" : "busy",
       };
       tools.set(tool.name, item);
       if (tool.name.toLowerCase().includes("mcp")) {
-        external.set(tool.name, { ...item, meta: "MCP / requiere auth", state: "pending" });
+        external.set(tool.name, { ...item, meta: "MCP / requires auth", state: "pending" });
       }
       for (const match of JSON.stringify(tool.input).matchAll(URL_RE)) {
         const url = match[0];
-        apis.set(url, { id: url, url, label: url, meta: `Usada por ${tool.name}`, state: "active" });
+        apis.set(url, { id: url, url, label: url, meta: `Used by ${tool.name}`, state: "active" });
       }
     }
   }
@@ -147,7 +147,7 @@ function buildFlow(steps: string[]): AppFlow {
     id: `auto-${i}`,
     type: "default",
     position: { x: 160, y: 40 + i * 104 },
-    data: { label: label || `Paso ${i + 1}` },
+    data: { label: label || `Step ${i + 1}` },
   }));
   const edges = limited.slice(1).map((_, i) => ({
     id: `auto-e-${i}`,

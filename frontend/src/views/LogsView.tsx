@@ -22,21 +22,21 @@ interface Facets {
 const PAGE = 50;
 
 const TYPE_LABEL: Record<string, string> = {
-  "app.create": "App creada",
-  "app.update": "App actualizada",
-  "app.delete": "App eliminada",
-  "app.define": "App definida",
-  "app.edit": "Cambio solicitado",
+  "app.create": "App created",
+  "app.update": "App updated",
+  "app.delete": "App deleted",
+  "app.define": "App defined",
+  "app.edit": "Change requested",
   "agent.trace": "Builder agent · trace",
-  "deploy.start": "Deploy iniciado",
+  "deploy.start": "Deploy started",
   "deploy.done": "Deploy OK",
-  "deploy.error": "Deploy con error",
+  "deploy.error": "Deploy failed",
   "deploy.rollback": "Rollback",
-  "mcp.connect": "MCP conectado",
-  "mcp.disconnect": "MCP desconectado",
-  "llm.call": "LLM · llamada",
-  "connector.call": "Conector · llamada",
-  "auth.login": "Inicio de sesión",
+  "mcp.connect": "MCP connected",
+  "mcp.disconnect": "MCP disconnected",
+  "llm.call": "LLM · call",
+  "connector.call": "Connector · call",
+  "auth.login": "Sign in",
 };
 
 function fmt(iso: string | null): string {
@@ -135,7 +135,7 @@ export function LogsView() {
         <header className="page-head">
           <h1>Logs</h1>
         </header>
-        <p className="muted-note">No tienes permiso para ver la bitácora (solo administradores).</p>
+        <p className="muted-note">You don't have permission to view the logs (admins only).</p>
       </div>
     );
   }
@@ -144,7 +144,7 @@ export function LogsView() {
     <div className="page logs-page">
       <header className="page-head">
         <div>
-          <p className="eyebrow">Auditoría · Admin</p>
+          <p className="eyebrow">Audit · Admin</p>
           <h1>Logs</h1>
         </div>
       </header>
@@ -153,54 +153,54 @@ export function LogsView() {
         <Dropdown
           value={type}
           onChange={onFilter(setType)}
-          placeholder="Todos los tipos"
+          placeholder="All types"
           options={[
-            { value: "", label: "Todos los tipos" },
+            { value: "", label: "All types" },
             ...facets.types.map((t) => ({ value: t, label: TYPE_LABEL[t] ?? t })),
           ]}
         />
         <Dropdown
           value={status}
           onChange={onFilter(setStatus)}
-          placeholder="Todos los estados"
+          placeholder="All statuses"
           options={[
-            { value: "", label: "Todos los estados" },
+            { value: "", label: "All statuses" },
             ...facets.statuses.map((s) => ({ value: s, label: s })),
           ]}
         />
         <Dropdown
           value={user}
           onChange={onFilter(setUser)}
-          placeholder="Todos los usuarios"
+          placeholder="All users"
           options={[
-            { value: "", label: "Todos los usuarios" },
+            { value: "", label: "All users" },
             ...facets.users.map((u) => ({ value: u, label: u })),
           ]}
         />
         <DateRangeField from={from} to={to} onChange={onRange} />
         <input
           className="logs-search"
-          placeholder="Buscar en el mensaje…"
+          placeholder="Search in message…"
           value={q}
           onChange={(e) => onFilter(setQ)(e.target.value)}
         />
         <button className="btn ghost sm" type="button" onClick={clearFilters}>
-          Limpiar
+          Clear
         </button>
       </div>
 
       <div className="logs-table">
         <div className="logs-row logs-row-head">
-          <span>Fecha</span>
-          <span>Evento</span>
-          <span>Estado</span>
-          <span>Usuario</span>
-          <span>Detalle</span>
+          <span>Date</span>
+          <span>Event</span>
+          <span>Status</span>
+          <span>User</span>
+          <span>Detail</span>
         </div>
         {loading ? (
-          <p className="muted-note">Cargando…</p>
+          <p className="muted-note">Loading…</p>
         ) : items.length === 0 ? (
-          <p className="muted-note">No hay eventos para los filtros seleccionados.</p>
+          <p className="muted-note">No events for the selected filters.</p>
         ) : (
           items.map((it) => {
             const open = expandedId === it.id;
@@ -230,19 +230,19 @@ export function LogsView() {
                 {open && (
                   <div className="logs-detail">
                     <div className="logs-detail-grid">
-                      <span className="logs-detail-k">Evento</span>
+                      <span className="logs-detail-k">Event</span>
                       <span className="logs-detail-v">{TYPE_LABEL[it.type] ?? it.type} ({it.type})</span>
-                      <span className="logs-detail-k">Estado</span>
+                      <span className="logs-detail-k">Status</span>
                       <span className="logs-detail-v">
                         <span className={`logs-status ${it.status}`}>{it.status}</span>
                       </span>
-                      <span className="logs-detail-k">Fecha</span>
+                      <span className="logs-detail-k">Date</span>
                       <span className="logs-detail-v">{fmt(it.created_at)}</span>
-                      <span className="logs-detail-k">Usuario</span>
+                      <span className="logs-detail-k">User</span>
                       <span className="logs-detail-v">{it.user ?? "—"}</span>
                       {it.provider && (
                         <>
-                          <span className="logs-detail-k">Proveedor</span>
+                          <span className="logs-detail-k">Provider</span>
                           <span className="logs-detail-v">{it.provider}</span>
                         </>
                       )}
@@ -271,7 +271,7 @@ export function LogsView() {
 
       <div className="logs-foot">
         <span className="muted-note">
-          {total} evento{total === 1 ? "" : "s"}
+          {total} event{total === 1 ? "" : "s"}
         </span>
         <div className="logs-pager">
           <button
@@ -280,7 +280,7 @@ export function LogsView() {
             disabled={page === 0}
             onClick={() => setPage((p) => Math.max(0, p - 1))}
           >
-            ← Anterior
+            ← Previous
           </button>
           <span className="muted-note">
             {page + 1} / {pages}
@@ -291,7 +291,7 @@ export function LogsView() {
             disabled={page + 1 >= pages}
             onClick={() => setPage((p) => p + 1)}
           >
-            Siguiente →
+            Next →
           </button>
         </div>
       </div>

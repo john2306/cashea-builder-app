@@ -54,7 +54,7 @@ export function VersionsDialog({
       onRollback();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo restaurar.");
+      setError(e instanceof Error ? e.message : "Could not restore.");
       setBusy(null);
     }
   };
@@ -75,19 +75,19 @@ export function VersionsDialog({
         aria-modal="true"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <h3 className="modal-title">Versiones de “{appTitle}”</h3>
+        <h3 className="modal-title">Versions of “{appTitle}”</h3>
         <p className="modal-message">
-          Historial de despliegues. Podés restaurar una versión anterior; se re-despliega sin
-          regenerar el código.
+          Deployment history. You can restore a previous version; it redeploys without
+          regenerating the code.
         </p>
 
         {error && <div className="composer-error">{error}</div>}
 
         <div className="versions-list">
           {!loaded ? (
-            <p className="muted-note">Cargando…</p>
+            <p className="muted-note">Loading…</p>
           ) : versions.length === 0 ? (
-            <p className="muted-note">Todavía no hay versiones. Se crean en cada despliegue.</p>
+            <p className="muted-note">No versions yet. They are created on each deployment.</p>
           ) : (
             versions.map((v, i) => (
               <div className="version-row" key={v.sha}>
@@ -98,7 +98,7 @@ export function VersionsDialog({
                   </span>
                 </div>
                 {i === 0 ? (
-                  <span className="version-tag">desplegada</span>
+                  <span className="version-tag">deployed</span>
                 ) : (
                   <button
                     className="modal-btn ghost"
@@ -106,7 +106,7 @@ export function VersionsDialog({
                     disabled={deploying || busy !== null}
                     onClick={() => rollback(v.sha)}
                   >
-                    {busy === v.sha ? "Restaurando…" : "Restaurar"}
+                    {busy === v.sha ? "Restoring…" : "Restore"}
                   </button>
                 )}
               </div>
@@ -116,7 +116,7 @@ export function VersionsDialog({
 
         <div className="modal-actions">
           <button className="modal-btn ghost" type="button" onClick={onClose}>
-            Cerrar
+            Close
           </button>
         </div>
       </div>

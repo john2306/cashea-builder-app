@@ -14,7 +14,7 @@ export function AttachmentChip({
       <span className="chip-name">{att.name}</span>
       <span className="chip-size">{humanSize(att.size)}</span>
       {onRemove && (
-        <button className="chip-remove" onClick={onRemove} aria-label="Quitar" type="button">
+        <button className="chip-remove" onClick={onRemove} aria-label="Remove" type="button">
           &times;
         </button>
       )}

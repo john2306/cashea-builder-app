@@ -217,28 +217,28 @@ export function McpView() {
   // Orden alfabético por nombre + filtro por texto (nombre del MCP).
   const visible = items
     .filter((it) => it.label.toLowerCase().includes(q.trim().toLowerCase()))
-    .sort((a, b) => a.label.localeCompare(b.label, "es", { sensitivity: "base" }));
+    .sort((a, b) => a.label.localeCompare(b.label, "en", { sensitivity: "base" }));
 
   return (
     <div className="page">
       <header className="page-head">
         <div>
-          <p className="eyebrow">Conectores del agente</p>
+          <p className="eyebrow">Agent connectors</p>
           <h1>Connectors</h1>
         </div>
         <input
           className="logs-search mcp-search"
           type="search"
-          placeholder="Buscar conector…"
+          placeholder="Search connector…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
       </header>
 
       {loading ? (
-        <p className="muted-note">Cargando…</p>
+        <p className="muted-note">Loading…</p>
       ) : visible.length === 0 ? (
-        <p className="muted-note">No hay conectores que coincidan con «{q}».</p>
+        <p className="muted-note">No connectors match «{q}».</p>
       ) : (
         <div className="card-grid">
           {visible.map((it) => {
@@ -246,11 +246,11 @@ export function McpView() {
             const isOAuth = it.auth === "oauth";
             const stateLabel = isOAuth
               ? it.connected
-                ? "Conectado"
-                : "Sin conectar"
+                ? "Connected"
+                : "Not connected"
               : it.connected
-                ? "Listo"
-                : "Requiere credenciales";
+                ? "Ready"
+                : "Requires credentials";
             return (
               <article className={`mcp-card ${it.connected ? "connected" : ""}`} key={it.provider}>
                 <div className="mcp-card-head">
@@ -274,8 +274,8 @@ export function McpView() {
                     className={`mcp-badge ${it.transport === "api" ? "api" : "mcp"}`}
                     title={
                       it.transport === "api"
-                        ? "Integración vía API directa"
-                        : "Integración vía servidor MCP"
+                        ? "Integration via direct API"
+                        : "Integration via MCP server"
                     }
                   >
                     {it.transport === "api" ? "API" : "MCP"}
@@ -289,7 +289,7 @@ export function McpView() {
                       type="button"
                       onClick={() => disconnect(it.provider)}
                     >
-                      Desconectar
+                      Disconnect
                     </button>
                   ) : (
                     <button
@@ -297,19 +297,19 @@ export function McpView() {
                       type="button"
                       onClick={() => connect(it.provider)}
                     >
-                      Conectar
+                      Connect
                     </button>
                   )
                 ) : (
                   <p className="mcp-hint">
                     {it.connected
-                      ? "Contenedor activo con credenciales."
-                      : `Define en .env: ${it.needs_env.join(", ")}`}
+                      ? "Container running with credentials."
+                      : `Define in .env: ${it.needs_env.join(", ")}`}
                   </p>
                 )}
 
                 {it.workspace_only && (
-                  <p className="mcp-ws-note">Solo con Google Workspace</p>
+                  <p className="mcp-ws-note">Google Workspace only</p>
                 )}
               </article>
             );

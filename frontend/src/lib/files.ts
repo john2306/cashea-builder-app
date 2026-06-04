@@ -37,7 +37,7 @@ export function humanSize(bytes: number): string {
 
 export async function fileToAttachment(file: File): Promise<Attachment> {
   if (file.size > MAX_FILE_BYTES) {
-    throw new Error(`"${file.name}" supera el límite de 10 MB.`);
+    throw new Error(`"${file.name}" exceeds the 10 MB limit.`);
   }
 
   const isImage = file.type.startsWith("image/");
@@ -74,7 +74,7 @@ export async function fileToAttachment(file: File): Promise<Attachment> {
   // Texto / código: si no es texto reconocible, lo intentamos igual como texto.
   const looksText = file.type.startsWith("text/") || TEXT_EXT.has(ext(file.name));
   if (!looksText && file.type) {
-    throw new Error(`Tipo de archivo no soportado: ${file.name} (${file.type}).`);
+    throw new Error(`Unsupported file type: ${file.name} (${file.type}).`);
   }
   return {
     kind: "text",

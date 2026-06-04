@@ -51,6 +51,10 @@ class AppProjectOut(BaseModel):
     deploy_stage: str | None = None
     slug: str | None = None
     url: str | None = None
+    owner_email: str | None = None
+    # Rol del usuario que pide la lista sobre esta app: admin|owner|editor|viewer.
+    # La UI lo usa para mostrar/ocultar acciones (eliminar = solo owner/admin; editar = +editor).
+    my_role: str = "viewer"
     created_at: datetime
     updated_at: datetime
 
@@ -61,6 +65,14 @@ class AppProjectOut(BaseModel):
 class AppProjectDetail(AppProjectOut):
     flow: AppFlow = Field(default_factory=AppFlow)
     integrations: AppIntegrations = Field(default_factory=AppIntegrations)
+
+
+class AppListPage(BaseModel):
+    """Página de apps (paginación server-side). `total` = total que coincide con el filtro."""
+    items: list[AppProjectOut]
+    total: int
+    limit: int
+    offset: int
 
 
 class AppProjectUpdate(BaseModel):

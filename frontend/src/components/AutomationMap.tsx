@@ -28,11 +28,11 @@ interface ResourceItem {
 }
 
 function stateLabel(state: ResourceState) {
-  if (state === "active") return "Activo";
-  if (state === "busy") return "En curso";
+  if (state === "active") return "Active";
+  if (state === "busy") return "In progress";
   if (state === "error") return "Error";
-  if (state === "idle") return "Listo";
-  return "Pendiente";
+  if (state === "idle") return "Ready";
+  return "Pending";
 }
 
 function integrationLabel(item: Record<string, unknown>, fallback: string) {
@@ -63,7 +63,7 @@ function toResources(items: Record<string, unknown>[], fallbackLabel: string): R
   return items.map((item, index) => ({
     id: String(item.id ?? `${fallbackLabel}-${index}`),
     label: integrationLabel(item, fallbackLabel),
-    meta: integrationMeta(item, "Co-creado con el usuario"),
+    meta: integrationMeta(item, "Co-created with the user"),
     state: integrationState(item),
   }));
 }
@@ -78,8 +78,8 @@ function ResourceLane({ title, items }: { title: string; items: ResourceItem[] }
       <div className="resource-list">
         {items.length === 0 && (
           <article className="resource-empty">
-            <p>Sin elementos todavia</p>
-            <span>Se agregaran cuando la app los necesite.</span>
+            <p>No items yet</p>
+            <span>They'll be added when the app needs them.</span>
           </article>
         )}
         {items.map((item) => (
@@ -103,7 +103,7 @@ function cleanNode(node: Node): Node {
     type: node.type ?? "default",
     position: node.position,
     data: {
-      label: typeof node.data?.label === "string" ? node.data.label : "Nuevo paso",
+      label: typeof node.data?.label === "string" ? node.data.label : "New step",
     },
   };
 }
@@ -129,7 +129,7 @@ function storedNode(node: Node): AppFlow["nodes"][number] {
     type: node.type ?? "default",
     position: node.position,
     data: {
-      label: typeof node.data?.label === "string" ? node.data.label : "Nuevo paso",
+      label: typeof node.data?.label === "string" ? node.data.label : "New step",
     },
   };
 }
@@ -152,7 +152,7 @@ function normalizeFlow(flow: AppFlow): { nodes: Node[]; edges: Edge[] } {
         ...node,
         type: node.type ?? "default",
         data: {
-          label: typeof node.data?.label === "string" ? node.data.label : "Paso",
+          label: typeof node.data?.label === "string" ? node.data.label : "Step",
         },
       } as Node),
     ),
@@ -259,10 +259,10 @@ export function AutomationMap({
     <aside className="workspace-drawer" aria-label={mode === "flow" ? "App Flow" : "Integrations"}>
       <header className="workspace-head">
         <div>
-          <p className="eyebrow">{mode === "flow" ? "React Flow" : "Conectores"}</p>
+          <p className="eyebrow">{mode === "flow" ? "React Flow" : "Connectors"}</p>
           <h2>{mode === "flow" ? "App Flow" : "Integrations"}</h2>
         </div>
-        <button className="close-panel-btn" type="button" onClick={onClose} aria-label="Cerrar">
+        <button className="close-panel-btn" type="button" onClick={onClose} aria-label="Close">
           &times;
         </button>
       </header>
@@ -270,21 +270,21 @@ export function AutomationMap({
       <section className="intent-strip">
         <p>{appTitle}</p>
         <div className="intent-stats">
-          <span>{flow.nodes.length} nodos</span>
-          <span>{flow.edges.length} conexiones</span>
-          <span>{saving ? "guardando" : "guardado"}</span>
+          <span>{flow.nodes.length} nodes</span>
+          <span>{flow.edges.length} connections</span>
+          <span>{saving ? "saving" : "saved"}</span>
         </div>
       </section>
 
       {mode === "flow" ? (
         <>
-          <section className="react-flow-card" aria-label="Flujo de logica de negocio">
+          <section className="react-flow-card" aria-label="Business logic flow">
             {nodes.length === 0 && (
               <div className="flow-empty-state">
-                <p>El flujo se construye solo</p>
+                <p>The flow builds itself</p>
                 <span>
-                  Describe la automatización en el chat y los pasos aparecerán aquí
-                  automáticamente.
+                  Describe the automation in the chat and the steps will appear here
+                  automatically.
                 </span>
               </div>
             )}
@@ -308,7 +308,7 @@ export function AutomationMap({
         </>
       ) : (
         <div className="integrations-board">
-          <ResourceLane title="Apps externas (auth)" items={mcpServers} />
+          <ResourceLane title="External apps (auth)" items={mcpServers} />
           <ResourceLane title="APIs" items={apis} />
           <ResourceLane title="Tools" items={tools} />
         </div>

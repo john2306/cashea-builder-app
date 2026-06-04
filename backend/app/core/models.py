@@ -103,6 +103,9 @@ class AppProject(Base):
     # Correo del creador/dueño de la app. Se auto-comparte al crear y NO se puede quitar
     # del acceso (siempre conserva acceso, aunque se editen los demás compartidos).
     owner_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Subconjunto de `shared_emails` con permiso de EDICIÓN (desplegar/editar, NO eliminar).
+    # El resto de los compartidos es solo-lectura. Eliminar la app = solo owner o admin.
+    editor_emails: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # Código generado (cache): {spec_hash, main_py, static_files, backend_reqs}.
     # Si la spec no cambió, "Actualizar" reusa esto y saltea la generación LLM.
     build_artifacts: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
@@ -153,12 +156,19 @@ class Connection(Base):
 
 
 class McpConnection(Base):
-    """Conexión OAuth a un servidor MCP del agente del Builder (global, por proveedor)."""
+    """Conexión OAuth a un conector, POR USUARIO (cada quien conecta sus cuentas).
+    Las apps desplegadas usan la conexión del DUEÑO (owner-token), resuelta por su user_sub."""
 
     __tablename__ = "mcp_connections"
+    __table_args__ = (
+        UniqueConstraint("user_sub", "provider", name="uq_mcp_user_provider"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    provider: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    # Dueño de la conexión (Google sub, estable). Las filas legacy (global) tienen NULL.
+    user_sub: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    user_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provider: Mapped[str] = mapped_column(String(40), index=True)
     access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     client_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -191,4 +201,27 @@ class EventLog(Base):
     meta: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
+class User(Base):
+    """Usuario de la plataforma (se crea/actualiza en cada login con Google). El `role`
+    (admin|member) es persistente y editable por admins. Los correos en ADMIN_EMAILS (env)
+    son admin permanente (bootstrap): se fuerzan a admin en login y no se pueden degradar."""
+
+    __tablename__ = "users"
+
+    email: Mapped[str] = mapped_column(String(255), primary_key=True)  # siempre lowercased
+    sub: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)  # Google sub
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Las URLs de avatar de Google pueden ser largas (>800 chars) → sin límite.
+    picture: Mapped[str | None] = mapped_column(Text, nullable=True)
+    role: Mapped[str] = mapped_column(
+        String(20), default="member", server_default="member"
+    )  # admin | member
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )

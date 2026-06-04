@@ -7,6 +7,7 @@ const VIEW_TO_PATH: Record<View, string> = {
   apps: "/apps",
   mcp: "/connectors",
   logs: "/logs",
+  users: "/users",
 };
 
 const PATH_TO_VIEW: Record<string, View> = {
@@ -14,6 +15,7 @@ const PATH_TO_VIEW: Record<string, View> = {
   "/apps": "apps",
   "/connectors": "mcp",
   "/logs": "logs",
+  "/users": "users",
 };
 
 const TITLES: Record<View, string> = {
@@ -21,6 +23,7 @@ const TITLES: Record<View, string> = {
   apps: "Apps",
   mcp: "Connectors",
   logs: "Logs",
+  users: "Users",
 };
 
 export interface Route {
@@ -31,7 +34,7 @@ export interface Route {
 function parse(pathname: string): Route {
   const parts = pathname.replace(/\/+$/, "").split("/").filter(Boolean);
   const base = "/" + (parts[0] ?? "");
-  const view = PATH_TO_VIEW[base] ?? "agents";
+  const view = PATH_TO_VIEW[base] ?? "apps";
   // Deep-link a una app concreta: /agents/<appId>
   const appId = view === "agents" && parts[1] ? parts[1] : null;
   return { view, appId };
@@ -53,9 +56,9 @@ export function useRouter() {
   useEffect(() => {
     const onPop = () => setRoute(parse(window.location.pathname));
     window.addEventListener("popstate", onPop);
-    // Normaliza "/" -> "/agents" sin agregar al historial.
+    // Normaliza "/" -> "/apps" sin agregar al historial (la app arranca en Apps).
     if (window.location.pathname === "/") {
-      window.history.replaceState(null, "", "/agents");
+      window.history.replaceState(null, "", "/apps");
     }
     return () => window.removeEventListener("popstate", onPop);
   }, []);

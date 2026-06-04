@@ -20,7 +20,7 @@ from sqlalchemy import select
 
 from ..core.crypto import decrypt, encrypt
 from ..core.db import SessionLocal
-from ..core.models import McpConnection
+from ..mcp.connstore import get_conn
 
 FILES = "https://www.googleapis.com/drive/v3/files"
 UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
@@ -42,11 +42,7 @@ class NotConnected(RuntimeError):
 async def _token() -> str:
     """Access token válido para Drive (refresca y persiste si expiró)."""
     async with SessionLocal() as session:
-        row = (
-            await session.execute(
-                select(McpConnection).where(McpConnection.provider == "google_drive")
-            )
-        ).scalar_one_or_none()
+        row = await get_conn(session, "google_drive")
         if row is None or not row.access_token:
             raise NotConnected("Google Drive no está conectado (conéctalo en Connectors).")
 

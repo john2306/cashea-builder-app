@@ -1,18 +1,8 @@
 import { viewPath } from "../router";
 import { logout, type SessionUser } from "../lib/auth";
 
-export type View = "agents" | "apps" | "mcp" | "logs";
+export type View = "agents" | "apps" | "mcp" | "logs" | "users";
 
-function AgentsIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="4" y="4" width="16" height="16" rx="4" />
-      <circle cx="9" cy="10" r="1.4" />
-      <circle cx="15" cy="10" r="1.4" />
-      <path d="M9 15c1 1 5 1 6 0" />
-    </svg>
-  );
-}
 function AppsIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -57,13 +47,27 @@ function LogsIcon() {
   );
 }
 
+function UsersIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M16 19v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 17.5V19" />
+      <circle cx="10" cy="8" r="3" />
+      <path d="M20 19v-1.5a3.5 3.5 0 0 0-2.6-3.4M15 5.2a3 3 0 0 1 0 5.6" />
+    </svg>
+  );
+}
+
+// "Builder Agents" NO va en el nav: la vista del builder se abre desde "+ Nueva app"
+// o al editar una app. La navegación principal arranca en Apps.
 const NAV: { id: View; label: string; icon: () => JSX.Element }[] = [
-  { id: "agents", label: "Builder Agents", icon: AgentsIcon },
   { id: "apps", label: "Apps", icon: AppsIcon },
   { id: "mcp", label: "Connectors", icon: McpIcon },
 ];
-// "Logs" solo para admin (se anexa dinámicamente según la sesión).
-const LOGS_ITEM = { id: "logs" as View, label: "Logs", icon: LogsIcon };
+// Items solo-admin (se anexan dinámicamente según la sesión).
+const ADMIN_NAV = [
+  { id: "users" as View, label: "Users", icon: UsersIcon },
+  { id: "logs" as View, label: "Logs", icon: LogsIcon },
+];
 
 function initialsOf(user?: SessionUser | null): string {
   const base = (user?.name || user?.email || "U").trim();
@@ -84,7 +88,7 @@ export function Sidebar({
   onToggle: () => void;
   user?: SessionUser | null;
 }) {
-  const displayName = user?.name || user?.email?.split("@")[0] || "Usuario";
+  const displayName = user?.name || user?.email?.split("@")[0] || "User";
   const email = user?.email || "";
   return (
     <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
@@ -103,13 +107,15 @@ export function Sidebar({
       {!collapsed && <span className="sidebar-section">Workspace</span>}
 
       <nav className="sidebar-nav">
-        {(user?.is_admin ? [...NAV, LOGS_ITEM] : NAV).map((item) => {
+        {(user?.is_admin ? [...NAV, ...ADMIN_NAV] : NAV).map((item) => {
           const Icon = item.icon;
+          // La vista del builder ("agents") se abre desde Apps → mantené Apps resaltado.
+          const active = view === item.id || (item.id === "apps" && view === "agents");
           return (
             <a
               key={item.id}
               href={viewPath(item.id)}
-              className={`sidebar-item tip tip-right ${view === item.id ? "active" : ""}`}
+              className={`sidebar-item tip tip-right ${active ? "active" : ""}`}
               data-tooltip={item.label}
               onClick={(e) => {
                 // Clic normal: navegación SPA. Cmd/Ctrl/medio: dejar abrir pestaña nueva.
@@ -146,8 +152,8 @@ export function Sidebar({
             className="sidebar-logout tip tip-top"
             type="button"
             onClick={logout}
-            aria-label="Cerrar sesión"
-            data-tooltip="Cerrar sesión"
+            aria-label="Sign out"
+            data-tooltip="Sign out"
           >
             <LogoutIcon />
           </button>
@@ -156,11 +162,11 @@ export function Sidebar({
           className="sidebar-collapse tip tip-right"
           type="button"
           onClick={onToggle}
-          aria-label={collapsed ? "Expandir" : "Contraer"}
-          data-tooltip={collapsed ? "Expandir" : "Contraer"}
+          aria-label={collapsed ? "Expand" : "Collapse"}
+          data-tooltip={collapsed ? "Expand" : "Collapse"}
         >
           <CollapseIcon collapsed={collapsed} />
-          {!collapsed && <span>Contraer</span>}
+          {!collapsed && <span>Collapse</span>}
         </button>
       </div>
     </aside>

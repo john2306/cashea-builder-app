@@ -49,8 +49,8 @@ export function McpButton() {
             <button
               className="mcp-x tip tip-top"
               type="button"
-              aria-label="Desconectar"
-              data-tooltip="Desconectar"
+              aria-label="Disconnect"
+              data-tooltip="Disconnect"
               onClick={() => disconnect(it.provider)}
             >
               ×
@@ -63,7 +63,7 @@ export function McpButton() {
             type="button"
             onClick={() => connect(it.provider)}
           >
-            Conectar {it.label} (MCP)
+            Connect {it.label} (MCP)
           </button>
         ),
       )}

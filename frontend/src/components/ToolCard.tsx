@@ -18,7 +18,7 @@ export function ToolCard({ tool }: { tool: ToolCall }) {
       >
         <span className={`tool-icon tool-icon-${iconState}`} aria-hidden="true" />
         <code className="tool-name">{tool.name}</code>
-        {tool.longRunning && <span className="badge">tarea larga</span>}
+        {tool.longRunning && <span className="badge">long task</span>}
         <Chevron open={open} />
       </button>
 

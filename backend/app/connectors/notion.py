@@ -16,7 +16,7 @@ from sqlalchemy import select
 
 from ..core.crypto import decrypt
 from ..core.db import SessionLocal
-from ..core.models import McpConnection
+from ..mcp.connstore import get_conn
 
 API = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
@@ -28,9 +28,7 @@ class NotConnected(RuntimeError):
 
 async def _token() -> str:
     async with SessionLocal() as session:
-        row = (
-            await session.execute(select(McpConnection).where(McpConnection.provider == "notion"))
-        ).scalar_one_or_none()
+        row = await get_conn(session, "notion")
         if row is None or not row.access_token:
             raise NotConnected("Notion no está conectado (conéctalo en Connectors).")
         return decrypt(row.access_token)

@@ -23,7 +23,7 @@ export function ConnectorsBar({
 
   return (
     <div className="connectors-bar">
-      <span className="connectors-label">Conectores</span>
+      <span className="connectors-label">Connectors</span>
       <div className="connectors-list">
         {ids.map((id) => {
           const meta = CONNECTOR_BY_ID[id];
@@ -40,8 +40,8 @@ export function ConnectorsBar({
                 <button
                   className="connector-x tip tip-top"
                   type="button"
-                  aria-label={`Desconectar ${meta.label}`}
-                  data-tooltip="Desconectar"
+                  aria-label={`Disconnect ${meta.label}`}
+                  data-tooltip="Disconnect"
                   onClick={() => onDisconnect(id)}
                 >
                   ×
@@ -56,11 +56,11 @@ export function ConnectorsBar({
               key={id}
               type="button"
               disabled={!isConfigured}
-              title={isConfigured ? "" : `Falta configurar credenciales de ${meta.label}`}
+              title={isConfigured ? "" : `${meta.label} credentials still need to be configured`}
               onClick={() => onConnect(id)}
             >
               <span className="connector-icon">{meta.icon}</span>
-              <span className="connector-name">Conectar {meta.label}</span>
+              <span className="connector-name">Connect {meta.label}</span>
             </button>
           );
         })}

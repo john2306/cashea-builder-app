@@ -3,8 +3,8 @@
   --surface: #ffffff;
   --surface-soft: #f7f8fb;
   --surface-raised: #ffffff;
-  --line: #dfe4ec;
-  --line-strong: #c7d0dc;
+  --line: #e9ecf2;
+  --line-strong: #d8dee7;
   --text: #171a21;
   --muted: #687282;
   --muted-strong: #4d5665;
@@ -19,14 +19,14 @@
   --side: #17191f;
   --side-soft: #22252d;
   --side-line: rgba(255, 255, 255, 0.12);
-  --shadow: 0 24px 70px rgba(29, 35, 48, 0.16);
-  --shadow-soft: 0 12px 30px rgba(29, 35, 48, 0.08);
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  /* Tipografía: Inter para toda la UI; monospace solo para código. */
-  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, sans-serif;
+  --shadow: 0 18px 48px rgba(29, 35, 48, 0.10);
+  --shadow-soft: 0 8px 22px rgba(29, 35, 48, 0.055);
+  --radius-sm: 9px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  /* Tipografía: Plus Jakarta Sans para toda la UI; monospace solo para código. */
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   /* Escala de tipos (coherente y legible para usuarios de negocio). */
   --text-xs: 0.75rem;
@@ -256,13 +256,16 @@ button {
 }
 
 .chat-header {
+  position: relative;
+  z-index: 30; /* por encima de .messages: que tooltips y el dropdown del modelo no queden tapados */
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 9px 22px;
+  padding: 7px 20px;
   border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: saturate(1.4) blur(8px);
 }
 
 .chat-header .eyebrow {
@@ -273,10 +276,10 @@ button {
 .chat-header h2 {
   margin: 0;
   color: var(--text);
-  font-size: 1.2rem;
+  font-size: 1.12rem;
   font-weight: 700;
-  line-height: 1.1;
-  letter-spacing: 0;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
 }
 
 /* Nombre de la app editable (reemplaza el dropdown de apps en el header). */
@@ -1039,33 +1042,31 @@ button {
   opacity: 0.72;
 }
 
-.status-pill {
-  min-width: max-content;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 11px;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.status-pill::before {
-  content: "";
-  width: 7px;
-  height: 7px;
+/* Estado de conexión: un punto minimalista (estilo macOS) con halo suave + tooltip.
+   El halo va con box-shadow porque ::before/::after los usa la flecha/caja del tooltip. */
+.status-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  background: currentColor;
+  cursor: default;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 
-.status-pill.online {
-  color: var(--ok);
-  background: var(--ok-soft);
+.status-dot.online {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-soft);
 }
 
-.status-pill.offline {
-  color: var(--err);
-  background: var(--err-soft);
+.status-dot.offline {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px var(--err-soft);
+  animation: dot-pulse 1.3s ease-in-out infinite;
+}
+
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
 .chat-jump {
@@ -1123,6 +1124,7 @@ button {
   gap: 18px;
   padding: 24px 22px;
   background:
+    radial-gradient(rgba(29, 35, 48, 0.06) 1.2px, transparent 1.4px) -6px -6px / 22px 22px,
     linear-gradient(180deg, rgba(247, 248, 251, 0.72), rgba(255, 255, 255, 0.35)),
     var(--surface);
 }
@@ -1995,7 +1997,7 @@ button {
     min-width: 170px;
   }
 
-  .status-pill {
+  .status-dot {
     margin-left: auto;
   }
 

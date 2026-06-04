@@ -134,6 +134,8 @@ export interface AppProject {
   deploy_stage?: string | null;
   slug?: string | null;
   url?: string | null;
+  owner_email?: string | null;
+  my_role?: "admin" | "owner" | "editor" | "viewer";
   created_at: string;
   updated_at: string;
   flow?: AppFlow;

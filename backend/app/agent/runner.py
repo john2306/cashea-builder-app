@@ -72,10 +72,20 @@ async def _capabilities_context() -> str:
 
     from ..core.models import McpConnection
     from ..mcp.catalog import catalog_list
+    from ..mcp.connstore import current_user_sub
 
+    sub = current_user_sub()
     async with SessionLocal() as session:
-        connected = set(
-            (await session.execute(select(McpConnection.provider))).scalars().all()
+        connected = (
+            set(
+                (
+                    await session.execute(
+                        select(McpConnection.provider).where(McpConnection.user_sub == sub)
+                    )
+                ).scalars().all()
+            )
+            if sub
+            else set()
         )
 
     def mark(p: str) -> str:
@@ -110,7 +120,6 @@ AVAILABLE_MODELS: set[str] = {
     "claude-opus-4-7",
     "claude-opus-4-6",
     "claude-sonnet-4-6",
-    "claude-haiku-4-5",
 }
 
 
@@ -541,13 +550,21 @@ async def run_agent(
     model: str | None = None,
     app_id: str | None = None,
     user_email: str | None = None,
+    user_sub: str | None = None,
 ) -> list[dict[str, Any]]:
     """Ejecuta el bucle agéntico sobre `messages` (in-place) hasta que Claude termina.
 
     `messages` se va ampliando con los turnos del asistente y los tool_result.
     Devuelve la lista de mensajes nuevos generados (asistente + tool_results) para persistir.
     `model` es el modelo elegido en la UI (validado contra AVAILABLE_MODELS).
+    `user_sub` fija el usuario vigente: los conectores se resuelven SOLO contra los suyos.
     """
+    # Aislamiento por-usuario: todo conector que se use en este run (MCP, API directa,
+    # contenedores self-hosted) se resuelve contra las conexiones de ESTE usuario.
+    from ..mcp.connstore import set_user
+
+    set_user(user_sub)
+
     new_messages: list[dict[str, Any]] = []
     selected_model = resolve_model(model)
 

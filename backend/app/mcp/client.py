@@ -19,6 +19,7 @@ from . import oauth as mcp_oauth
 from ..core.crypto import decrypt, encrypt
 from ..core.db import SessionLocal
 from .catalog import load_catalog
+from .connstore import current_user_sub, get_conn
 from ..core.models import McpConnection
 
 
@@ -43,11 +44,7 @@ async def _valid_token(session, row: McpConnection) -> str:
 async def _connection_creds(provider: str) -> tuple[str, dict[str, str]]:
     """(token hosted-oauth, env self_hosted-oauth) de la conexión guardada."""
     async with SessionLocal() as session:
-        row = (
-            await session.execute(
-                select(McpConnection).where(McpConnection.provider == provider)
-            )
-        ).scalar_one_or_none()
+        row = await get_conn(session, provider)
         if row is None:
             raise RuntimeError(f"'{provider}' no está conectado por MCP")
         token = await _valid_token(session, row) if row.access_token else ""
@@ -55,8 +52,12 @@ async def _connection_creds(provider: str) -> tuple[str, dict[str, str]]:
     return token, env
 
 
-async def _connect_params(provider: str, user: str = "builder") -> tuple[str, dict[str, str], bool]:
-    """Devuelve (url, headers, es_pool) para conectar al MCP del provider."""
+async def _connect_params(
+    provider: str, user: str | None = None
+) -> tuple[str, dict[str, str], bool]:
+    """Devuelve (url, headers, es_pool) para conectar al MCP del provider.
+    El contenedor self-hosted se keyea por usuario vigente (aislamiento por-usuario)."""
+    pool_user = user or current_user_sub() or "builder"
     spec = load_catalog().get(provider)
     if spec is None:
         raise RuntimeError(f"MCP '{provider}' desconocido")
@@ -68,7 +69,7 @@ async def _connect_params(provider: str, user: str = "builder") -> tuple[str, di
         _token, env = await _connection_creds(provider)
         if not env:
             raise RuntimeError(f"'{provider}' conectado sin credenciales resueltas")
-        url = await ensure_server(spec, env, user)
+        url = await ensure_server(spec, env, pool_user)
         return url, {}, True
 
     if spec.auth == "oauth":  # hosted oauth (Notion): token por usuario en header
@@ -80,7 +81,7 @@ async def _connect_params(provider: str, user: str = "builder") -> tuple[str, di
 
 
 async def list_tools(
-    provider: str, user: str = "builder", quick: bool = False
+    provider: str, user: str | None = None, quick: bool = False
 ) -> list[dict[str, Any]]:
     """Lista las herramientas del MCP server (para puentearlas al agente).
 
@@ -111,7 +112,7 @@ async def list_tools(
 
 
 async def call_tool(
-    provider: str, tool: str, args: dict[str, Any] | None, user: str = "builder"
+    provider: str, tool: str, args: dict[str, Any] | None, user: str | None = None
 ) -> dict[str, Any]:
     url, headers, is_pool = await _connect_params(provider, user)
     attempts = 22 if is_pool else 1

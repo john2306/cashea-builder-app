@@ -32,13 +32,13 @@ export function LoginScreen() {
         <img className="login-logo" src="/logo192.png" alt="Cashea Hub App" />
         <h1 className="login-title">Cashea Hub App</h1>
         <p className="login-sub">
-          Construye y despliega apps reales con lenguaje natural.
+          Build and deploy real apps with natural language.
         </p>
         <a className="login-google" href={loginUrl()}>
           <GoogleIcon />
-          <span>Continuar con Google</span>
+          <span>Continue with Google</span>
         </a>
-        <p className="login-foot">Acceso exclusivo con tu cuenta de Google.</p>
+        <p className="login-foot">Access only with your Google account.</p>
       </div>
     </div>
   );

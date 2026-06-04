@@ -32,7 +32,7 @@ export function ModelSelect({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title="Modelo de Claude"
+        title="Claude model"
       >
         <span className="model-dd-spark" aria-hidden="true">✦</span>
         <span className="model-dd-label">{current.label}</span>
@@ -41,7 +41,7 @@ export function ModelSelect({
 
       {open && (
         <div className="model-dd-panel" role="listbox">
-          <div className="model-dd-head">Modelo</div>
+          <div className="model-dd-head">Model</div>
           {MODELS.map((m) => (
             <button
               key={m.id}

@@ -54,6 +54,42 @@ async def init_db() -> None:
         await conn.execute(
             text("ALTER TABLE mcp_connections ADD COLUMN IF NOT EXISTS env_json TEXT")
         )
+        # Conectores POR USUARIO: cada fila pertenece a un user_sub (Google sub).
+        await conn.execute(
+            text("ALTER TABLE mcp_connections ADD COLUMN IF NOT EXISTS user_sub VARCHAR(255)")
+        )
+        await conn.execute(
+            text("ALTER TABLE mcp_connections ADD COLUMN IF NOT EXISTS user_email VARCHAR(255)")
+        )
+        # Backfill del dueño en conexiones legacy (global, user_sub NULL): atribuir al usuario
+        # del último evento `mcp.connect` de ese provider (mapeando email→sub vía users).
+        await conn.execute(
+            text(
+                "UPDATE mcp_connections mc SET user_sub = u.sub, user_email = u.email "
+                "FROM ("
+                "  SELECT DISTINCT ON (provider) provider, lower(user_email) AS email"
+                "  FROM event_logs"
+                "  WHERE event_type = 'mcp.connect' AND user_email IS NOT NULL AND user_email <> ''"
+                "  ORDER BY provider, created_at DESC"
+                ") ev JOIN users u ON u.email = ev.email "
+                "WHERE mc.provider = ev.provider AND mc.user_sub IS NULL"
+            )
+        )
+        # El unique viejo era por `provider` (global). Ahora es por (user_sub, provider).
+        # Según cómo se creó, puede ser un CONSTRAINT y/o un UNIQUE INDEX → soltamos ambos.
+        await conn.execute(
+            text("ALTER TABLE mcp_connections DROP CONSTRAINT IF EXISTS mcp_connections_provider_key")
+        )
+        await conn.execute(text("DROP INDEX IF EXISTS ix_mcp_connections_provider"))
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_mcp_connections_provider ON mcp_connections (provider)")
+        )
+        await conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_mcp_user_provider "
+                "ON mcp_connections (user_sub, provider)"
+            )
+        )
         await conn.execute(
             text("ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS dashboard JSON")
         )
@@ -68,6 +104,27 @@ async def init_db() -> None:
         )
         await conn.execute(
             text("ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS owner_email VARCHAR(255)")
+        )
+        await conn.execute(
+            text("ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS editor_emails JSON")
+        )
+        # Backfill del dueño en apps legacy (owner_email NULL): toma el correo del PRIMER
+        # evento de esa app en la bitácora (app.create / deploy). Idempotente: solo toca NULLs.
+        await conn.execute(
+            text(
+                "UPDATE app_projects ap SET owner_email = sub.email FROM ("
+                "  SELECT DISTINCT ON (app_id) app_id, lower(user_email) AS email"
+                "  FROM event_logs"
+                "  WHERE app_id IS NOT NULL AND user_email IS NOT NULL AND user_email <> ''"
+                "  ORDER BY app_id, created_at ASC"
+                ") sub "
+                "WHERE ap.id = sub.app_id "
+                "AND (ap.owner_email IS NULL OR ap.owner_email = '')"
+            )
+        )
+        # La URL de avatar de Google puede superar 512 chars → ampliamos a TEXT.
+        await conn.execute(
+            text("ALTER TABLE users ALTER COLUMN picture TYPE TEXT")
         )
         await conn.execute(
             text("ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS build_artifacts JSON")

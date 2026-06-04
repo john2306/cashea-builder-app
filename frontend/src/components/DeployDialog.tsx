@@ -83,35 +83,35 @@ export function DeployDialog({
       onClose();
     } else {
       const d = await r.json().catch(() => ({}));
-      setError(d.detail || "No se pudo desplegar.");
+      setError(d.detail || "Could not deploy.");
     }
   };
 
   const hint: Record<Avail, string> = {
     idle: "",
-    checking: "Verificando disponibilidad…",
-    available: "✓ Disponible",
-    taken: "✗ Ya está en uso — elegí otro",
-    invalid: "Usá letras, números y guiones",
+    checking: "Checking availability…",
+    available: "✓ Available",
+    taken: "✗ Already in use — pick another",
+    invalid: "Use letters, numbers and hyphens",
   };
   const canDeploy = avail === "available" && !deploying;
 
   return createPortal(
     <div className="modal-overlay" onMouseDown={onClose}>
       <div className="modal-card deploy-modal" role="dialog" aria-modal="true" onMouseDown={(e) => e.stopPropagation()}>
-        <h3 className="modal-title">Desplegar “{app.title}”</h3>
-        <p className="modal-message">Elegí el subdominio público de la app.</p>
+        <h3 className="modal-title">Deploy “{app.title}”</h3>
+        <p className="modal-message">Choose the app's public subdomain.</p>
 
         <div className="deploy-field">
           <div className="deploy-field-head">
-            <label className="deploy-label">Subdominio</label>
+            <label className="deploy-label">Subdomain</label>
             <span className="deploy-count">{slugify(slug).length}/{SLUG_MAX}</span>
           </div>
           <div className="deploy-slug">
             <input
               value={slug}
               onChange={(e) => setSlug(e.target.value.slice(0, SLUG_MAX))}
-              placeholder="mi-app"
+              placeholder="my-app"
               maxLength={SLUG_MAX}
               autoFocus
               spellCheck={false}
@@ -129,17 +129,17 @@ export function DeployDialog({
         <label className={`deploy-rebuild ${rebuild ? "on" : ""}`}>
           <input type="checkbox" checked={rebuild} onChange={(e) => setRebuild(e.target.checked)} />
           <span className="deploy-rebuild-text">
-            <b>Reconstrucción total</b>
-            <small>Regenera el código desde cero · más lenta</small>
+            <b>Full rebuild</b>
+            <small>Regenerates the code from scratch · slower</small>
           </span>
         </label>
 
         <div className="modal-actions">
           <button className="modal-btn ghost" type="button" onClick={onClose}>
-            Cancelar
+            Cancel
           </button>
           <button className="modal-btn primary" type="button" onClick={deploy} disabled={!canDeploy}>
-            {deploying ? "Desplegando…" : "Desplegar"}
+            {deploying ? "Deploying…" : "Deploy"}
           </button>
         </div>
       </div>

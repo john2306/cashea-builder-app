@@ -11,7 +11,7 @@ export function Dropdown({
   value,
   options,
   onChange,
-  placeholder = "Seleccionar…",
+  placeholder = "Select…",
   className = "",
 }: {
   value: string;

@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from ..core.crypto import decrypt, encrypt
 from ..core.db import SessionLocal
-from ..core.models import McpConnection
+from ..mcp.connstore import get_conn
 
 CAL = "https://www.googleapis.com/calendar/v3"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -31,11 +31,7 @@ class NotConnected(RuntimeError):
 async def _token() -> str:
     """Access token válido para Calendar (refresca y persiste si expiró)."""
     async with SessionLocal() as session:
-        row = (
-            await session.execute(
-                select(McpConnection).where(McpConnection.provider == "google_calendar")
-            )
-        ).scalar_one_or_none()
+        row = await get_conn(session, "google_calendar")
         if row is None or not row.access_token:
             raise NotConnected("Google Calendar no está conectado (conéctalo en Connectors).")
 

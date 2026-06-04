@@ -44,7 +44,7 @@ export function useAgentSocket() {
       ...m,
       tools: m.tools.map((t) =>
         t.result === null
-          ? { ...t, result: "(ejecución finalizada sin resultado)", isError: true, progress: 1 }
+          ? { ...t, result: "(run finished with no result)", isError: true, progress: 1 }
           : t,
       ),
     }));
@@ -211,7 +211,7 @@ export function useAgentSocket() {
         setConnected(false);
         patchActive((m) => ({
           ...m,
-          text: m.text + "\n\n⚠️ No se pudo iniciar el run. Reintentá.",
+          text: m.text + "\n\n⚠️ Could not start the run. Try again.",
         }));
       }
     },

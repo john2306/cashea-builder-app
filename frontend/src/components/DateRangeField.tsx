@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { DayPicker, type DateRange } from "react-day-picker";
-import { es } from "react-day-picker/locale";
+import { enUS } from "react-day-picker/locale";
 import "react-day-picker/style.css";
 
 /** Convierte "YYYY-MM-DD" en Date local (sin corrimiento de zona horaria). */
@@ -20,7 +20,7 @@ function serialize(date?: Date): string {
 
 function fmt(date?: Date): string {
   return date
-    ? date.toLocaleDateString("es", { day: "2-digit", month: "2-digit", year: "numeric" })
+    ? date.toLocaleDateString("en", { day: "2-digit", month: "2-digit", year: "numeric" })
     : "";
 }
 
@@ -29,7 +29,7 @@ export function DateRangeField({
   from,
   to,
   onChange,
-  placeholder = "Rango de fechas",
+  placeholder = "Date range",
 }: {
   from: string;
   to: string;
@@ -91,7 +91,7 @@ export function DateRangeField({
         <div className="datefield-panel" role="dialog">
           <DayPicker
             mode="range"
-            locale={es}
+            locale={enUS}
             selected={range}
             defaultMonth={range?.from}
             showOutsideDays
@@ -114,7 +114,7 @@ export function DateRangeField({
                 setOpen(false);
               }}
             >
-              Borrar rango
+              Clear range
             </button>
           )}
         </div>

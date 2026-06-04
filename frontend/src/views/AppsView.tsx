@@ -1,28 +1,31 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DeployDialog } from "../components/DeployDialog";
 import { ShareDialog } from "../components/ShareDialog";
 import { SpecReviewDialog } from "../components/SpecReviewDialog";
 import { VersionsDialog } from "../components/VersionsDialog";
+import { Dropdown } from "../components/Dropdown";
 import { getToken } from "../lib/auth";
 import type { AppProject } from "../types";
 
 const DEPLOY_LABEL: Record<string, string> = {
-  idle: "Sin desplegar",
-  deploying: "Desplegando…",
+  idle: "Not deployed",
+  deploying: "Deploying…",
   deployed: "Live",
   error: "Error",
 };
 
 type Sort = "new" | "old" | "az" | "za" | "live";
 const SORTS: { id: Sort; label: string }[] = [
-  { id: "new", label: "Más recientes" },
-  { id: "old", label: "Más antiguas" },
-  { id: "az", label: "Nombre A → Z" },
-  { id: "za", label: "Nombre Z → A" },
-  { id: "live", label: "Live primero" },
+  { id: "new", label: "Newest" },
+  { id: "old", label: "Oldest" },
+  { id: "az", label: "Name A → Z" },
+  { id: "za", label: "Name Z → A" },
+  { id: "live", label: "Live first" },
 ];
+
+const PAGE = 30; // tamaño de página (paginación server-side para escalar a miles de apps)
 
 const EMOJIS = [
   "📊", "📈", "📉", "🗓️", "📅", "⏰", "📨", "✉️",
@@ -48,27 +51,21 @@ function PencilIcon() {
   );
 }
 
-function compareApps(a: AppProject, b: AppProject, sort: Sort): number {
-  switch (sort) {
-    case "old":
-      return a.created_at.localeCompare(b.created_at);
-    case "az":
-      return a.title.localeCompare(b.title);
-    case "za":
-      return b.title.localeCompare(a.title);
-    case "live": {
-      const al = a.deploy_state === "deployed" ? 0 : 1;
-      const bl = b.deploy_state === "deployed" ? 0 : 1;
-      return al - bl || b.created_at.localeCompare(a.created_at);
-    }
-    default:
-      return b.created_at.localeCompare(a.created_at);
-  }
-}
 
-export function AppsView({ onBuild }: { onBuild: (appId: string) => void }) {
+export function AppsView({
+  onBuild,
+  isAdmin = false,
+}: {
+  onBuild: (appId: string) => void;
+  isAdmin?: boolean;
+}) {
   const [apps, setApps] = useState<AppProject[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [ownerFilter, setOwnerFilter] = useState(""); // "" = todos (solo admin)
+  const [owners, setOwners] = useState<string[]>([]); // dueños para el filtro admin
+  const [scope, setScope] = useState(""); // member: "" ambas | mine | shared
   const [pendingDelete, setPendingDelete] = useState<AppProject | null>(null);
   const [pendingShare, setPendingShare] = useState<AppProject | null>(null);
   const [pendingDeploy, setPendingDeploy] = useState<AppProject | null>(null);
@@ -83,20 +80,79 @@ export function AppsView({ onBuild }: { onBuild: (appId: string) => void }) {
   const [nameDraft, setNameDraft] = useState("");
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const refresh = useCallback(async () => {
+  // URL de la lista con paginación + búsqueda/orden/filtro server-side (escala a miles de apps).
+  const listUrl = useCallback(
+    (offset: number, limit: number) => {
+      const p = new URLSearchParams({ limit: String(limit), offset: String(offset), sort });
+      if (query.trim()) p.set("q", query.trim());
+      if (isAdmin && ownerFilter) p.set("owner", ownerFilter);
+      if (!isAdmin && scope) p.set("scope", scope);
+      return `/api/apps?${p.toString()}`;
+    },
+    [query, sort, isAdmin, ownerFilter, scope],
+  );
+
+  // Primera página: reemplaza la lista al cambiar búsqueda/orden/filtro.
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
-      const r = await fetch("/api/apps");
-      if (r.ok) setApps(await r.json());
+      const r = await fetch(listUrl(0, PAGE));
+      if (r.ok) {
+        const d = await r.json();
+        setApps(d.items ?? []);
+        setTotal(d.total ?? 0);
+      }
     } catch {
       /* ignore */
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [listUrl]);
 
+  // Re-trae los ya cargados (sin perder la cantidad) para refrescar estados de deploy.
+  const refresh = useCallback(async () => {
+    try {
+      const r = await fetch(listUrl(0, Math.max(PAGE, apps.length)));
+      if (r.ok) {
+        const d = await r.json();
+        setApps(d.items ?? []);
+        setTotal(d.total ?? 0);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [listUrl, apps.length]);
+
+  const loadMore = useCallback(async () => {
+    setLoadingMore(true);
+    try {
+      const r = await fetch(listUrl(apps.length, PAGE));
+      if (r.ok) {
+        const d = await r.json();
+        setApps((prev) => [...prev, ...(d.items ?? [])]);
+        setTotal(d.total ?? 0);
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [listUrl, apps.length]);
+
+  // (Re)carga la 1ra página al cambiar filtros; debounce para no consultar en cada tecla.
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    const t = setTimeout(load, 250);
+    return () => clearTimeout(t);
+  }, [load]);
+
+  // Dueños para el filtro de admin (todos los usuarios conocidos).
+  useEffect(() => {
+    if (!isAdmin) return;
+    fetch("/api/users")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((us: { email: string }[]) => setOwners(us.map((u) => u.email).sort()))
+      .catch(() => {});
+  }, [isAdmin]);
 
   useEffect(() => {
     const anyDeploying = apps.some((a) => a.deploy_state === "deploying");
@@ -159,17 +215,16 @@ export function AppsView({ onBuild }: { onBuild: (appId: string) => void }) {
     fetch(`/api/apps/${id}/deploy/cancel`, { method: "POST" }).then(refresh);
   };
 
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const rows = q ? apps.filter((a) => a.title.toLowerCase().includes(q)) : apps;
-    return [...rows].sort((a, b) => compareApps(a, b, sort));
-  }, [apps, query, sort]);
+  // Permisos por app (el backend manda `my_role`). canEdit: desplegar/editar; canOwn: eliminar/compartir.
+  const roleOf = (a: AppProject) => a.my_role || (isAdmin ? "admin" : "viewer");
+  const canEdit = (a: AppProject) => ["admin", "owner", "editor"].includes(roleOf(a));
+  const canOwn = (a: AppProject) => ["admin", "owner"].includes(roleOf(a));
 
   const createAndBuild = async () => {
     const r = await fetch("/api/apps", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: "Nuevo agente" }),
+      body: JSON.stringify({ title: "New agent" }),
     });
     if (r.ok) onBuild((await r.json()).id);
   };
@@ -210,7 +265,7 @@ export function AppsView({ onBuild }: { onBuild: (appId: string) => void }) {
       <header className="hub-head">
         <div>
           <h1>Apps</h1>
-          <p className="hub-count">{apps.length} app{apps.length === 1 ? "" : "s"}</p>
+          <p className="hub-count">{total} app{total === 1 ? "" : "s"}</p>
         </div>
         <div className="hub-tools">
           <div className="hub-search">
@@ -218,9 +273,32 @@ export function AppsView({ onBuild }: { onBuild: (appId: string) => void }) {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar apps…"
+              placeholder="Search apps…"
             />
           </div>
+          {isAdmin ? (
+            <Dropdown
+              className="hub-owner-filter"
+              value={ownerFilter}
+              onChange={setOwnerFilter}
+              placeholder="All users"
+              options={[
+                { value: "", label: "All users" },
+                ...owners.map((o) => ({ value: o, label: o })),
+              ]}
+            />
+          ) : (
+            <Dropdown
+              className="hub-owner-filter"
+              value={scope}
+              onChange={setScope}
+              options={[
+                { value: "", label: "All" },
+                { value: "mine", label: "My apps" },
+                { value: "shared", label: "Shared with me" },
+              ]}
+            />
+          )}
           <div className="hub-sort-dd">
             <button
               className="hub-sort"
@@ -258,26 +336,29 @@ export function AppsView({ onBuild }: { onBuild: (appId: string) => void }) {
             )}
           </div>
           <button className="hub-new" type="button" onClick={createAndBuild}>
-            + Nueva app
+            + New app
           </button>
         </div>
       </header>
 
       {loading ? (
-        <p className="muted-note">Cargando…</p>
-      ) : visible.length === 0 ? (
-        <p className="muted-note">No hay apps. Crea una con "Nueva app".</p>
+        <p className="muted-note">Loading…</p>
+      ) : apps.length === 0 ? (
+        <p className="muted-note">
+          {query.trim() || ownerFilter ? "No matching apps." : 'No apps yet. Create one with "New app".'}
+        </p>
       ) : (
         <div className="hub-table">
           <div className="hub-row hub-row-head">
             <span>App</span>
-            <span>Estado</span>
-            <span>Actualizado</span>
+            <span>Status</span>
+            <span>Updated</span>
             <span />
           </div>
 
-          {visible.map((app) => {
+          {apps.map((app) => {
             const live = app.deploy_state === "deployed";
+            const sharedWithMe = app.my_role === "editor" || app.my_role === "viewer";
             return (
               <div className="hub-row" key={app.id}>
                 <div className="hub-name">
@@ -285,8 +366,8 @@ export function AppsView({ onBuild }: { onBuild: (appId: string) => void }) {
                     className="hub-icon-btn"
                     type="button"
                     style={app.color ? { background: app.color, color: "#fff" } : undefined}
-                    title="Ícono y color"
-                    aria-label="Elegir ícono y color"
+                    title="Icon and color"
+                    aria-label="Choose icon and color"
                     onClick={(e) => {
                       const r = e.currentTarget.getBoundingClientRect();
                       setPicker({ app, top: r.bottom + 8, left: r.left });
@@ -315,17 +396,40 @@ export function AppsView({ onBuild }: { onBuild: (appId: string) => void }) {
                       }}
                     />
                   ) : (
-                    <span className="hub-title">
-                      <span className="hub-title-text">{app.title}</span>
-                      <button
-                        className="hub-name-edit"
-                        type="button"
-                        aria-label="Editar nombre"
-                        onClick={() => startEdit(app)}
-                      >
-                        <PencilIcon />
-                      </button>
-                    </span>
+                    <div className="hub-name-main">
+                      <span className="hub-title">
+                        <span className="hub-title-text">{app.title}</span>
+                        {canEdit(app) && (
+                          <button
+                            className="hub-name-edit"
+                            type="button"
+                            aria-label="Edit name"
+                            onClick={() => startEdit(app)}
+                          >
+                            <PencilIcon />
+                          </button>
+                        )}
+                        {sharedWithMe && (
+                          <span
+                            className="hub-shared-tag"
+                            title={`Shared by ${app.owner_email ?? "another user"}`}
+                          >
+                            Shared
+                          </span>
+                        )}
+                      </span>
+                      {(isAdmin || sharedWithMe) && (app.owner_email || sharedWithMe) && (
+                        <span
+                          className="hub-owner"
+                          title={app.owner_email ? `Owner: ${app.owner_email}` : undefined}
+                        >
+                          {app.owner_email ?? "Unknown owner"}
+                          {sharedWithMe && (
+                            <> · {app.my_role === "editor" ? "Edit" : "View"}</>
+                          )}
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
 
@@ -348,53 +452,83 @@ export function AppsView({ onBuild }: { onBuild: (appId: string) => void }) {
                 </span>
 
                 <div className="hub-row-actions">
-                  {!live && (
-                    <button
-                      className="hub-build"
-                      type="button"
-                      onClick={() => onBuild(app.id)}
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M4 20h4l10-10-4-4L4 16v4z" />
-                        <path d="M14 6l4 4" />
-                      </svg>
-                      Construir
-                    </button>
-                  )}
                   {live && app.url && (
                     <a
                       className="hub-open tip tip-top"
                       href={app.url}
                       target="_blank"
                       rel="noreferrer"
-                      data-tooltip="Abrir app"
-                      aria-label="Abrir app"
+                      data-tooltip="Open app"
+                      aria-label="Open app"
                     >
                       <svg viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M7 17L17 7M9 7h8v8" />
                       </svg>
                     </a>
                   )}
-                  <button
-                    className="hub-kebab tip tip-top"
-                    type="button"
-                    aria-label="Acciones"
-                    data-tooltip="Acciones"
-                    onClick={(e) => {
-                      if (menu?.app.id === app.id) {
-                        setMenu(null);
-                        return;
-                      }
-                      const r = e.currentTarget.getBoundingClientRect();
-                      setMenu({ app, top: r.bottom + 6, right: window.innerWidth - r.right });
-                    }}
-                  >
-                    ⋯
-                  </button>
+                  {canEdit(app) && (
+                    <button
+                      className="hub-act tip tip-top"
+                      type="button"
+                      onClick={() => onBuild(app.id)}
+                      data-tooltip={live ? "Edit in builder" : "Build"}
+                      aria-label="Edit"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                      </svg>
+                    </button>
+                  )}
+                  {canEdit(app) && app.deploy_state !== "deploying" && (
+                    <button
+                      className="hub-act tip tip-top tip-end"
+                      type="button"
+                      onClick={() => setPendingDeploy(app)}
+                      data-tooltip={live ? "Update deployment" : "Deploy"}
+                      aria-label="Deploy"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 19V6M6 12l6-6 6 6" />
+                        <path d="M5 21h14" />
+                      </svg>
+                    </button>
+                  )}
+                  {canEdit(app) && (
+                    <button
+                      className="hub-kebab tip tip-top tip-end"
+                      type="button"
+                      aria-label="More actions"
+                      data-tooltip="More actions"
+                      onClick={(e) => {
+                        if (menu?.app.id === app.id) {
+                          setMenu(null);
+                          return;
+                        }
+                        const r = e.currentTarget.getBoundingClientRect();
+                        setMenu({ app, top: r.bottom + 6, right: window.innerWidth - r.right });
+                      }}
+                    >
+                      ⋯
+                    </button>
+                  )}
                 </div>
               </div>
             );
           })}
+        </div>
+      )}
+
+      {!loading && apps.length < total && (
+        <div className="hub-more">
+          <button
+            className="hub-more-btn"
+            type="button"
+            onClick={loadMore}
+            disabled={loadingMore}
+          >
+            {loadingMore ? "Loading…" : `Load more (${total - apps.length})`}
+          </button>
         </div>
       )}
 
@@ -403,20 +537,7 @@ export function AppsView({ onBuild }: { onBuild: (appId: string) => void }) {
           <>
             <div className="hub-menu-backdrop" onClick={() => setMenu(null)} />
             <div className="hub-menu" style={{ top: menu.top, right: menu.right }}>
-              <button
-                type="button"
-                onClick={() => {
-                  onBuild(menu.app.id);
-                  setMenu(null);
-                }}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M4 20h4l10-10-4-4L4 16v4z" />
-                  <path d="M14 6l4 4" />
-                </svg>
-                Construir
-              </button>
-              {menu.app.deploy_state === "deploying" ? (
+              {menu.app.deploy_state === "deploying" && (
                 <button
                   type="button"
                   className="danger"
@@ -428,21 +549,7 @@ export function AppsView({ onBuild }: { onBuild: (appId: string) => void }) {
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M6 6l12 12M18 6L6 18" />
                   </svg>
-                  Cancelar deploy
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPendingDeploy(menu.app);
-                    setMenu(null);
-                  }}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M12 19V6M6 12l6-6 6 6" />
-                    <path d="M5 21h14" />
-                  </svg>
-                  {menu.app.deploy_state === "deployed" ? "Actualizar" : "Desplegar"}
+                  Cancel deploy
                 </button>
               )}
               <button
@@ -455,23 +562,25 @@ export function AppsView({ onBuild }: { onBuild: (appId: string) => void }) {
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M4 6h16M4 12h16M4 18h10" />
                 </svg>
-                Configuración
+                Settings
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setPendingShare(menu.app);
-                  setMenu(null);
-                }}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <circle cx="18" cy="5" r="2.4" />
-                  <circle cx="6" cy="12" r="2.4" />
-                  <circle cx="18" cy="19" r="2.4" />
-                  <path d="M8 11l8-5M8 13l8 5" />
-                </svg>
-                Compartir
-              </button>
+              {canOwn(menu.app) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingShare(menu.app);
+                    setMenu(null);
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="18" cy="5" r="2.4" />
+                    <circle cx="6" cy="12" r="2.4" />
+                    <circle cx="18" cy="19" r="2.4" />
+                    <path d="M8 11l8-5M8 13l8 5" />
+                  </svg>
+                  Share
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -484,21 +593,23 @@ export function AppsView({ onBuild }: { onBuild: (appId: string) => void }) {
                   <path d="M3 4v4h4" />
                   <path d="M12 8v4l3 2" />
                 </svg>
-                Versiones
+                Versions
               </button>
-              <button
-                type="button"
-                className="danger"
-                onClick={() => {
-                  setPendingDelete(menu.app);
-                  setMenu(null);
-                }}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
-                </svg>
-                Eliminar
-              </button>
+              {canOwn(menu.app) && (
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => {
+                    setPendingDelete(menu.app);
+                    setMenu(null);
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 7h14M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
+                  </svg>
+                  Delete
+                </button>
+              )}
             </div>
           </>,
           document.body,
@@ -535,8 +646,8 @@ export function AppsView({ onBuild }: { onBuild: (appId: string) => void }) {
                 <button
                   type="button"
                   className="ip-color ip-clear"
-                  title="Quitar color"
-                  aria-label="Quitar color"
+                  title="Remove color"
+                  aria-label="Remove color"
                   onClick={() => patchApp(picker.app.id, { color: "" })}
                 >
                   ×
@@ -549,15 +660,15 @@ export function AppsView({ onBuild }: { onBuild: (appId: string) => void }) {
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        title="Eliminar app"
+        title="Delete app"
         message={
           <>
-            Vas a eliminar <strong>{pendingDelete?.title}</strong> y su despliegue
-            (contenedores e imágenes). Esta acción no se puede deshacer.
+            You are about to delete <strong>{pendingDelete?.title}</strong> and its deployment
+            (containers and images). This action cannot be undone.
           </>
         }
-        confirmLabel="Eliminar"
-        cancelLabel="Cancelar"
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
         danger
         onConfirm={confirmRemove}
         onCancel={() => setPendingDelete(null)}
