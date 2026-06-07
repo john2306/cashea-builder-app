@@ -22,7 +22,6 @@ from .mcp import oauth as mcp_oauth
 from .agent import runner
 from .mcp.registry import MCP_REGISTRY
 from .auth import decode_jwt, encode_jwt
-from .builder.codegen import generate_app_files
 from .core.config import settings
 from .connectors import PROVIDERS, build_authorize_url, detect_providers, is_configured
 from .core.crypto import decrypt, encrypt
@@ -59,6 +58,21 @@ _oauth_states: dict[str, tuple[str, str, str, float]] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    # Skills (Manager): siembra las built-in desde archivos y carga el snapshot en memoria.
+    try:
+        from .agent import skills as agent_skills
+
+        await agent_skills.seed_from_files()
+        await agent_skills.refresh()
+    except Exception:  # noqa: BLE001
+        pass
+    # Estado de conectores (Manager): carga el set deshabilitado.
+    try:
+        from .mcp import state as connector_state
+
+        await connector_state.refresh()
+    except Exception:  # noqa: BLE001
+        pass
     # Recrea contenedores MCP por usuario (tras reinicio) y arranca el reaper de ociosos.
     try:
         from .mcp import pool as mcp_pool
@@ -96,11 +110,11 @@ async def current_user(authorization: str = Header(default="")) -> dict:
 
 def _is_public_api(path: str) -> bool:
     """Rutas /api que NO exigen sesión del builder:
-    - gateway de apps desplegadas (X-App-Secret) y datos de dashboard del visor;
+    - gateway de apps desplegadas (X-App-Secret);
     - flujos OAuth (navegación/popup y callbacks, que no pueden llevar el header de sesión)."""
     if path == "/api/health" or path == "/api/config":
         return True
-    if "/access" in path or "/owner-token/" in path or path.startswith("/api/dashboards/"):
+    if "/access" in path:
         return True
     if path.endswith("/llm"):  # proxy LLM de la app desplegada (auth por X-App-Secret)
         return True
@@ -160,28 +174,6 @@ async def _unique_slug(
             return slug
         slug = f"{base}-{n}"
         n += 1
-
-
-def _message_text(content: object) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = [
-            b.get("text", "")
-            for b in content
-            if isinstance(b, dict) and b.get("type") == "text"
-        ]
-        return "\n".join(parts)
-    return ""
-
-
-def _transcript(rows: list[Message]) -> str:
-    lines = []
-    for m in rows:
-        text = _message_text(m.content).strip()
-        if text:
-            lines.append(f"{m.role.upper()}: {text}")
-    return "\n\n".join(lines)[:12000]
 
 
 # Deploys en curso: app_id -> id de la tarea Celery (para poder cancelar/revocar).
@@ -432,6 +424,7 @@ async def delete_app(
     app_project = await _app_require_owner(session, request, app_id)
     slug = app_project.slug
     title = app_project.title
+    had_db = bool(app_project.db_password)  # tenía base de datos propia (schema+rol)
     # DELETE a nivel Core sobre la conversación: el ON DELETE CASCADE de la BD
     # arrastra la app y los mensajes. Evita el lazy-loading de relaciones en async.
     await session.execute(
@@ -447,6 +440,15 @@ async def delete_app(
     if slug:
         try:
             await asyncio.to_thread(teardown_app, slug)
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Borra la base de datos propia de la app (schema + rol en apps-postgres), si tenía.
+    if had_db:
+        try:
+            from .core.appdb import deprovision as deprovision_db
+
+            await deprovision_db(app_id)
         except Exception:  # noqa: BLE001
             pass
 
@@ -571,11 +573,19 @@ async def cancel_deploy(
 async def app_versions(
     app_id: str, request: Request, session: AsyncSession = Depends(get_session)
 ):
-    """Historial de versiones desplegadas (commits del repo git local de la app)."""
-    await _app_for_request(session, request, app_id)
+    """Historial de versiones desplegadas (commits del repo git local de la app). Cada item trae
+    `current` = es la versión actualmente desplegada (se resalta en su posición, sin reordenar)."""
+    ap = await _app_for_request(session, request, app_id)
     from .builder.app_repo import list_versions
 
-    return await asyncio.to_thread(list_versions, app_id)
+    versions = await asyncio.to_thread(list_versions, app_id)
+    deployed = (getattr(ap, "deployed_sha", None) or "") if ap else ""
+    # Fallback: si aún no hay deployed_sha (apps previas), la más reciente es la desplegada.
+    if not deployed and versions:
+        deployed = versions[0]["sha"]
+    for v in versions:
+        v["current"] = bool(deployed) and v["sha"] == deployed
+    return versions
 
 
 @app.post("/api/apps/{app_id}/rollback", response_model=AppProjectDetail)
@@ -626,7 +636,9 @@ async def app_rollback(
         message=f"Restaurando versión {str(sha)[:12]} ({app_project.slug})",
         meta={"sha": sha},
     )
-    result = run_deploy_task.delay(app_project.id, app_project.slug, False, email or "")
+    result = run_deploy_task.delay(
+        app_project.id, app_project.slug, False, email or "", str(sha)
+    )
     _deploy_tasks[app_project.id] = result.id
     app_project.my_role = await _app_role(session, request, app_project) or "viewer"
     return app_project
@@ -751,73 +763,9 @@ async def app_access(
     return {"allowed": allowed}
 
 
-@app.get("/api/apps/{app_id}/owner-token/{provider}")
-async def owner_token(
-    app_id: str, provider: str, x_app_secret: str = Header(default=""),
-    session: AsyncSession = Depends(get_session),
-):
-    """Vende el token del DUEÑO para un conector (las apps usan las credenciales del dueño,
-    no las del visor). Autorizado por el secreto por-app."""
-    _require_app_secret(app_id, x_app_secret)
-    from .mcp.connstore import get_conn, use_user
-
-    # Normaliza el provider a la CLAVE del catálogo (acepta guion o guion bajo):
-    # google-docs == google_docs, google-sheets == google_sheets, etc.
-    key = provider.replace("-", "_")
-
-    # La app usa las credenciales del DUEÑO → resolvemos por su EMAIL (identidad estable).
-    ap = await session.get(AppProject, app_id)
-    owner_email = (ap.owner_email or "").strip().lower() if ap else ""
-
-    # google_sheets: reutiliza el refresh ya implementado (con el usuario = dueño).
-    if key == "google_sheets":
-        from .connectors import sheets as sheets_api
-
-        try:
-            with use_user(owner_email):
-                return {"access_token": await sheets_api._token(), "token_type": "Bearer"}
-        except sheets_api.NotConnected:
-            raise HTTPException(
-                status_code=409,
-                detail=f"The app owner ({owner_email or 'unknown'}) hasn't connected Google Sheets.",
-            )
-
-    row = await get_conn(session, key, owner_email)
-    if row is None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"The app owner ({owner_email or 'unknown'}) hasn't connected {provider}.",
-        )
-
-    if key == "slack":
-        env = json.loads(decrypt(row.env_json)) if row.env_json else {}
-        return {"access_token": env.get("SLACK_BOT_TOKEN", ""), "token_type": "Bearer"}
-
-    # OAuth (Google docs/drive/calendar/gmail/bigquery, Notion): refresca si expiró usando los
-    # datos guardados en la conexión + GOOGLE_CLIENT_SECRET. Notion no expira (no entra acá).
-    token = decrypt(row.access_token) if row.access_token else ""
-    now = datetime.now(timezone.utc)
-    if row.expires_at and row.expires_at <= now and row.refresh_token:
-        try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                resp = await client.post(
-                    row.token_endpoint or "https://oauth2.googleapis.com/token",
-                    data={
-                        "grant_type": "refresh_token",
-                        "refresh_token": decrypt(row.refresh_token),
-                        "client_id": row.client_id or os.environ.get("GOOGLE_CLIENT_ID", ""),
-                        "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
-                    },
-                )
-            tok = resp.json()
-            if tok.get("access_token"):
-                token = tok["access_token"]
-                row.access_token = encrypt(token)
-                row.expires_at = _expiry(tok)
-                await session.commit()
-        except Exception:  # noqa: BLE001
-            pass
-    return {"access_token": token, "token_type": "Bearer"}
+# owner-token ELIMINADO: todas las apps usan el CONNECTOR PROXY
+# (POST /api/apps/{app_id}/mcp/{provider}/{tool}). La plataforma ejecuta la tool con la conexión
+# del dueño y nunca entrega tokens crudos a las apps. Ver app_connector_proxy.
 
 
 # ===================== Agente: run desacoplado (POST + SSE) =====================
@@ -876,6 +824,29 @@ async def agent_run_stream(run_id: str, request: Request):
 
 # ===================== Connector proxy (MCP) para apps desplegadas =====================
 
+# Identificadores seguros (no-PII) cuyo VALOR sí registramos en la auditoría. El resto de los
+# argumentos se anonimiza (solo tipo/tamaño) para NO guardar datos sensibles en los logs
+# (celdas, cuerpos de correo, destinatarios, etc.) — gobierno de PII.
+_SAFE_ARG_KEYS = {
+    "spreadsheet_id", "range", "a1_range", "sheet_name", "file_id", "folder_id", "new_parent",
+    "document_id", "calendar_id", "event_id", "message_id", "parent", "parent_id",
+    "permanent", "anyone", "role", "max_results", "page_size", "index", "mime",
+}
+
+
+def _safe_arg_summary(args: dict | None) -> dict:
+    """Resumen de argumentos para auditoría: valores seguros tal cual; el resto, solo tipo/tamaño."""
+    out: dict[str, Any] = {}
+    for k, v in (args or {}).items():
+        if k in _SAFE_ARG_KEYS and isinstance(v, (str, int, float, bool)):
+            out[k] = v
+        elif isinstance(v, (list, dict, str)):
+            out[k] = f"<{type(v).__name__}:{len(v)}>"  # tamaño, sin contenido
+        else:
+            out[k] = f"<{type(v).__name__}>"
+    return out
+
+
 @app.post("/api/apps/{app_id}/mcp/{provider}/{tool}")
 async def app_connector_proxy(
     app_id: str, provider: str, tool: str,
@@ -887,7 +858,7 @@ async def app_connector_proxy(
     manda {"arguments": {...}} y la plataforma habla con el MCP server con el token del dueño
     (nunca expuesto a la app). Auth por X-App-Secret + auditoría en Logs."""
     from .mcp.proxy import ConnectorError, call_owner_tool
-    from .mcp.connstore import use_user
+    from .mcp.connstore import use_app, use_user
 
     _require_app_secret(app_id, x_app_secret)
     ap = await session.get(AppProject, app_id)
@@ -895,20 +866,36 @@ async def app_connector_proxy(
     args = (body or {}).get("arguments")
     if args is None:
         args = {k: v for k, v in (body or {}).items() if k != "arguments"}
+    arg_summary = _safe_arg_summary(args)
+    t0 = time.perf_counter()
+    # Auditoría: registramos el DUEÑO (cuya conexión MCP se usó) + tool + resumen de args + latencia.
     try:
-        with use_user(owner_email):  # la app corre con la conexión del dueño
+        # use_user → conexiones del dueño (Sheets/Notion/…); use_app → DB propia de ESTA app (postgres).
+        with use_user(owner_email), use_app(app_id):
             res = await call_owner_tool(provider, tool, args)
     except ConnectorError as exc:
         await log_event("connector.call", status="error", app_id=app_id, provider=provider,
-                        message=f"{provider}:{tool} — {exc}"[:240])
+                        user_email=owner_email or None, message=f"{provider}:{tool} — {exc}"[:240],
+                        meta={"tool": tool, "args": arg_summary, "error": str(exc)[:200],
+                              "duration_ms": round((time.perf_counter() - t0) * 1000)})
         raise HTTPException(status_code=409, detail=str(exc))
     except Exception as exc:  # noqa: BLE001
         await log_event("connector.call", status="error", app_id=app_id, provider=provider,
-                        message=f"{provider}:{tool} — error")
+                        user_email=owner_email or None, message=f"{provider}:{tool} — error",
+                        meta={"tool": tool, "args": arg_summary, "error": str(exc)[:200],
+                              "duration_ms": round((time.perf_counter() - t0) * 1000)})
         raise HTTPException(status_code=502, detail=f"Error del conector: {exc}")
     await log_event(
         "connector.call", status="ok" if res.get("ok") else "error",
-        app_id=app_id, provider=provider, message=f"{provider}:{tool}",
+        app_id=app_id, provider=provider, user_email=owner_email or None,
+        message=f"{provider}:{tool}",
+        meta={
+            "tool": tool,
+            "args": arg_summary,
+            "ok": bool(res.get("ok")),
+            "out_bytes": len(res.get("text") or ""),
+            "duration_ms": round((time.perf_counter() - t0) * 1000),
+        },
     )
     return res
 
@@ -971,45 +958,6 @@ async def app_llm(
         },
     )
     return result
-
-
-# ===================== Dashboard de Google Sheet =====================
-
-@app.get("/api/dashboards/{app_id}/data")
-async def dashboard_data(
-    app_id: str,
-    user: dict = Depends(current_user),  # cualquier usuario con sesión (SSO) puede ver
-    session: AsyncSession = Depends(get_session),
-):
-    """Sirve los datos de la Sheet configurada (leída con el token del dueño) + la config.
-
-    El dashboard desplegado (SSO) llama acá; los datos son de la Sheet fija configurada.
-    """
-    app_project = await session.get(AppProject, app_id)
-    cfg = app_project.dashboard if app_project else None
-    if not cfg:
-        raise HTTPException(status_code=404, detail="Este dashboard no está configurado.")
-
-    from .connectors import sheets as sheets_api
-    from .mcp.connstore import use_user
-
-    owner_email = (app_project.owner_email or "").strip().lower() if app_project else ""
-    rng = cfg.get("range") or ""
-    try:
-        with use_user(owner_email):  # se lee con la Sheet del DUEÑO
-            if not rng:
-                meta = await sheets_api.metadata(cfg["spreadsheet_id"])
-                rng = meta["sheets"][0]["title"] if meta["sheets"] else "Sheet1"
-            rows = await sheets_api.read_range(cfg["spreadsheet_id"], rng)
-    except sheets_api.NotConnected:
-        raise HTTPException(status_code=409, detail="Google Sheets no está conectado en el builder.")
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"No se pudo leer la Sheet: {exc}")
-
-    headers = rows[0] if rows else []
-    data = rows[1:] if len(rows) > 1 else []
-    return {"title": cfg.get("title", app_project.title), "headers": headers, "rows": data,
-            "config": cfg}
 
 
 # ===================== Conectores (OAuth2.0) =====================
@@ -1094,8 +1042,6 @@ def _extract_account(provider_id: str, token: dict) -> str | None:
         return (token.get("team") or {}).get("name") or (
             token.get("authed_user") or {}
         ).get("id")
-    if provider_id == "notion":
-        return token.get("workspace_name")
     return token.get("email")
 
 
@@ -1539,6 +1485,143 @@ async def set_user_role(
         message=f"Rol de {target} → {role}", meta={"target": target, "role": role},
     )
     return {"email": u.email, "role": u.role}
+
+
+# ===================== Manager (admin): Skills + Conectores/Tools =====================
+
+def _skill_dict(s) -> dict:
+    return {
+        "name": s.name, "description": s.description or "", "when_to_use": s.when_to_use or "",
+        "body": s.body or "", "enabled": bool(s.enabled), "built_in": bool(s.built_in),
+        "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+    }
+
+
+@app.get("/api/admin/skills")
+async def admin_list_skills(request: Request, session: AsyncSession = Depends(get_session)):
+    await _require_admin_db(request, session)
+    from .core.models import AgentSkill
+
+    rows = (await session.execute(select(AgentSkill).order_by(AgentSkill.name))).scalars().all()
+    return {"items": [_skill_dict(s) for s in rows]}
+
+
+_SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
+
+
+@app.post("/api/admin/skills", status_code=201)
+async def admin_create_skill(
+    body: dict, request: Request, session: AsyncSession = Depends(get_session)
+):
+    me = await _require_admin_db(request, session)
+    from .agent import skills as agent_skills
+    from .core.models import AgentSkill
+
+    name = (body.get("name") or "").strip().lower()
+    if not _SKILL_NAME_RE.fullmatch(name):
+        raise HTTPException(status_code=400, detail="Nombre inválido (kebab-case, 2-63 chars).")
+    if await session.get(AgentSkill, name):
+        raise HTTPException(status_code=409, detail="Ya existe una skill con ese nombre.")
+    sk = AgentSkill(
+        name=name, description=(body.get("description") or "").strip(),
+        when_to_use=(body.get("when_to_use") or "").strip(), body=(body.get("body") or ""),
+        enabled=bool(body.get("enabled", True)), built_in=False,
+    )
+    session.add(sk)
+    await session.commit()
+    await agent_skills.refresh()
+    await log_event("skill.create", status="info", user_email=me, message=f"Skill creada: {name}")
+    return _skill_dict(sk)
+
+
+@app.put("/api/admin/skills/{name}")
+async def admin_update_skill(
+    name: str, body: dict, request: Request, session: AsyncSession = Depends(get_session)
+):
+    me = await _require_admin_db(request, session)
+    from .agent import skills as agent_skills
+    from .core.models import AgentSkill
+
+    sk = await session.get(AgentSkill, name.strip().lower())
+    if sk is None:
+        raise HTTPException(status_code=404, detail="Skill no encontrada.")
+    for field in ("description", "when_to_use", "body"):
+        if field in body:
+            setattr(sk, field, body[field] or "")
+    if "enabled" in body:
+        sk.enabled = bool(body["enabled"])
+    await session.commit()
+    await agent_skills.refresh()
+    await log_event("skill.update", status="info", user_email=me, message=f"Skill editada: {sk.name}")
+    return _skill_dict(sk)
+
+
+@app.delete("/api/admin/skills/{name}", status_code=204)
+async def admin_delete_skill(
+    name: str, request: Request, session: AsyncSession = Depends(get_session)
+):
+    me = await _require_admin_db(request, session)
+    from .agent import skills as agent_skills
+    from .core.models import AgentSkill
+
+    sk = await session.get(AgentSkill, name.strip().lower())
+    if sk is None:
+        raise HTTPException(status_code=404, detail="Skill no encontrada.")
+    await session.delete(sk)
+    await session.commit()
+    await agent_skills.refresh()
+    await log_event("skill.delete", status="info", user_email=me, message=f"Skill eliminada: {name}")
+
+
+@app.get("/api/admin/connectors")
+async def admin_list_connectors(request: Request, session: AsyncSession = Depends(get_session)):
+    """Lista conectores/MCP con su estado (enabled) y sus tools. Para la sección Manager."""
+    await _require_admin_db(request, session)
+    from .mcp import state as connector_state
+    from .mcp.catalog import load_catalog
+    from .mcp.servers import get_local_server
+
+    catalog = load_catalog()
+    # Unión de proveedores: catálogo (hosted/self_hosted/api) + servers locales (postgres, etc.).
+    providers: dict[str, dict] = {}
+    for key, spec in catalog.items():
+        providers[key] = {
+            "provider": key, "label": spec.label, "transport": spec.transport,
+            "agent_hint": spec.agent_hint, "tools": [],
+        }
+    for key in ("google_sheets", "google_drive", "google_docs", "gmail", "google_calendar", "postgres"):
+        local = get_local_server(key)
+        if local is None:
+            continue
+        info = providers.setdefault(
+            key, {"provider": key, "label": local.label, "transport": "local", "agent_hint": "", "tools": []}
+        )
+        info["transport"] = "local"
+        info["tools"] = [
+            {"name": t["name"], "description": t.get("description", "")} for t in local.list_tools()
+        ]
+    items = []
+    for key, info in sorted(providers.items()):
+        info["enabled"] = connector_state.is_enabled(key)
+        items.append(info)
+    return {"items": items}
+
+
+@app.put("/api/admin/connectors/{provider}")
+async def admin_set_connector(
+    provider: str, body: dict, request: Request, session: AsyncSession = Depends(get_session)
+):
+    me = await _require_admin_db(request, session)
+    from .mcp import state as connector_state
+
+    enabled = bool(body.get("enabled", True))
+    await connector_state.set_enabled(provider, enabled)
+    await log_event(
+        "connector.toggle", status="info", user_email=me,
+        message=f"Conector {provider} → {'enabled' if enabled else 'disabled'}",
+        meta={"provider": provider, "enabled": enabled},
+    )
+    return {"provider": provider.replace("-", "_"), "enabled": enabled}
 
 
 @app.get("/auth/google/login")

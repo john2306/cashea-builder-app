@@ -233,6 +233,7 @@ button {
 }
 
 .chat-panel {
+  position: relative; /* ancla el overlay de deploy (.deploy-overlay) */
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -242,6 +243,170 @@ button {
   border: none;
   box-shadow: none;
   backdrop-filter: blur(18px) saturate(150%);
+}
+
+/* Marcador de deploy en la conversación (hito: "Deployed" entre mensajes) */
+.deploy-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 12px 0;
+  width: 100%;
+}
+.deploy-marker-line {
+  flex: 1;
+  height: 1px;
+  background: var(--line, #e7e9ee);
+}
+.deploy-marker-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #138a57;
+  background: #e7f7ee;
+  border: 1px solid #bfe8d2;
+  border-radius: 999px;
+  padding: 4px 12px;
+  white-space: nowrap;
+}
+.deploy-marker-rocket {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #138a57;
+}
+.deploy-marker-link {
+  color: #138a57;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+/* ===================== Overlay de deploy (Chat Builder) ===================== */
+.deploy-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(6px) saturate(120%);
+  animation: deploy-overlay-in 0.18s ease;
+}
+@keyframes deploy-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.deploy-overlay-card {
+  width: min(440px, 92%);
+  background: #fff;
+  border: 1px solid var(--border, #e7e9ee);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 12px 40px rgba(15, 23, 42, 0.12);
+  padding: 26px 26px 22px;
+  text-align: center;
+}
+.deploy-overlay-title {
+  margin: 0 0 18px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text, #0f172a);
+}
+
+/* Stepper de fases (puntos conectados): Generate → Test → Deploy */
+.deploy-stepper {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 6px;
+  margin: 0 0 16px;
+}
+.deploy-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 74px;
+}
+.deploy-step-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  border: 2px solid var(--border, #e7e9ee);
+  background: #fff;
+  color: var(--muted, #64748b);
+  transition: 0.2s;
+}
+.deploy-step.done .deploy-step-dot {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+}
+.deploy-step.active .deploy-step-dot {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #fff;
+  animation: deploy-step-pulse 1.2s ease-in-out infinite;
+}
+.deploy-step.failed .deploy-step-dot {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+}
+.deploy-step-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted, #64748b);
+}
+.deploy-step.active .deploy-step-label,
+.deploy-step.done .deploy-step-label {
+  color: var(--text, #0f172a);
+}
+.deploy-step-line {
+  flex: 1;
+  min-width: 18px;
+  height: 2px;
+  margin-top: 13px;
+  background: var(--border, #e7e9ee);
+  border-radius: 2px;
+  transition: 0.2s;
+}
+.deploy-step-line.filled {
+  background: #16a34a;
+}
+@keyframes deploy-step-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(15, 23, 42, 0.16); }
+  50% { box-shadow: 0 0 0 8px rgba(15, 23, 42, 0.05); }
+}
+.deploy-overlay-app {
+  display: inline-block;
+  background: #0f172a;
+  color: #fff;
+  padding: 2px 10px;
+  border-radius: 8px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+.deploy-overlay-current {
+  margin: 0 0 14px;
+  font-size: 0.92rem;
+  color: var(--text, #0f172a);
+  min-height: 1.2em;
+}
+.deploy-overlay-current.failed {
+  color: #dc2626;
+}
+.deploy-overlay-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted, #64748b);
 }
 
 .builder-panel {
@@ -1837,6 +2002,35 @@ button {
 .chip-icon-document {
   color: var(--warning);
 }
+
+/* Miniatura (imágenes) e ícono-badge por tipo (PDF/CSV/XLSX/TXT) en el chip de adjunto. */
+.chip-thumb {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+.chip-badge {
+  width: 30px;
+  height: 28px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: #64748b; /* default (txt/otros) */
+}
+.chip-badge-pdf { background: #dc2626; }
+.chip-badge-csv { background: #16a34a; }
+.chip-badge-xlsx { background: #15803d; }
+.chip-badge-img { background: #4f46e5; }
+.chip-badge-txt { background: #64748b; }
 
 .chip-name {
   min-width: 0;

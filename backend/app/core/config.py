@@ -21,6 +21,11 @@ class Settings(BaseSettings):
 
     # --- Infraestructura ---
     database_url: str = "postgresql+asyncpg://postgres:postgres@postgres:5432/automation"
+    # Postgres SEPARADO para las bases de datos POR APP (schema + rol por app). URL del rol
+    # ADMIN (provisiona/borra schemas y roles); las apps NUNCA la ven. DSN asyncpg puro.
+    apps_database_admin_url: str = (
+        "postgresql://appsadmin:apps-insecure-admin-change-me@apps-postgres:5432/appsdata"
+    )
     redis_url: str = "redis://redis:6379/0"
     celery_broker_url: str = "redis://redis:6379/1"
     celery_result_backend: str = "redis://redis:6379/2"

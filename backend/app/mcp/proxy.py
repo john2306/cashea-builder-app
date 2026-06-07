@@ -18,6 +18,7 @@ import httpx
 
 from .catalog import load_catalog
 from .registry import active_mcp_servers
+from .servers import get_local_server
 
 
 class ConnectorError(RuntimeError):
@@ -79,28 +80,86 @@ async def _hosted_call(url: str, token: str, tool: str, arguments: dict[str, Any
     }
 
 
+def _is_unknown_tool(text: str) -> bool:
+    """Detecta el error de 'tool inexistente' (JSON-RPC -32602 / method not found)."""
+    t = (text or "").lower()
+    return (
+        "not found in the list of tools" in t
+        or "method not found" in t
+        or "-32602" in t
+        or "unknown tool" in t
+    )
+
+
+async def _available_tools(provider: str) -> list[str]:
+    """Lista las tools del MCP (nombre + args requeridos) para auto-documentar errores de tool."""
+    try:
+        from . import client as mcp_client
+
+        out: list[str] = []
+        for t in await mcp_client.list_tools(provider, quick=True):
+            req = (t.get("input_schema") or {}).get("required") or []
+            out.append(f"{t['name']}({', '.join(req)})")
+        return out
+    except Exception:  # noqa: BLE001 — best-effort; no rompe el flujo de error
+        return []
+
+
+async def _enrich_unknown_tool(res: dict[str, Any], provider: str, tool: str, label: str) -> dict[str, Any]:
+    """Si la tool no existe, agrega al error la lista de tools disponibles (con sus args)."""
+    if res.get("ok") or not _is_unknown_tool(res.get("text", "")):
+        return res
+    names = await _available_tools(provider)
+    if names:
+        res["text"] = (
+            f"Tool '{tool}' no existe en {label}. Tools disponibles: {', '.join(names)}."
+        )
+        res.setdefault("result", {})
+        if isinstance(res["result"], dict):
+            res["result"]["available_tools"] = names
+    return res
+
+
 async def call_owner_tool(provider: str, tool: str, arguments: dict[str, Any] | None) -> dict[str, Any]:
     """Ejecuta `tool` del conector MCP `provider` con la conexión del dueño. Devuelve
     {ok, text, result}."""
+    arguments = arguments or {}
+
+    from . import state as connector_state
+
+    if not connector_state.is_enabled(provider):
+        raise ConnectorError(f"El conector '{provider}' está deshabilitado por el administrador.")
+
+    # MCP server self-hosted propio (in-process, reusa connectors/*): el camino que reemplaza a
+    # owner-token. El dueño vigente ya viene en el contextvar (lo fija app_connector_proxy).
+    local = get_local_server(provider)
+    if local is not None:
+        res = await local.dispatch(tool, arguments)
+        # "dueño no conectó" -> ConnectorError (el proxy lo mapea a 409, igual que los hosted).
+        if not res.get("ok") and (res.get("result") or {}).get("error") == "not_connected":
+            raise ConnectorError(res.get("text") or f"{local.label} no está conectado.")
+        return res
+
     spec = load_catalog().get(provider)
     if spec is None:
         raise ConnectorError(f"Conector '{provider}' desconocido.")
-    arguments = arguments or {}
 
     if spec.transport == "self_hosted":
         from . import client as mcp_client
 
         res = await mcp_client.call_tool(provider, tool, arguments)
         text = res.get("text") or json.dumps(res.get("structured") or {}, ensure_ascii=False)
-        return {"ok": not res.get("is_error"), "text": text or "(sin contenido)", "result": res}
+        out = {"ok": not res.get("is_error"), "text": text or "(sin contenido)", "result": res}
+        return await _enrich_unknown_tool(out, provider, tool, spec.label)
 
     if spec.transport == "hosted":
         servers = await active_mcp_servers()
         entry = next((s for s in servers if s.get("name") == provider), None)
         if not entry:
             raise ConnectorError(f"{spec.label} no está conectado (conéctalo en Connectors).")
-        return await _hosted_call(entry["url"], entry["authorization_token"], tool, arguments)
+        out = await _hosted_call(entry["url"], entry["authorization_token"], tool, arguments)
+        return await _enrich_unknown_tool(out, provider, tool, spec.label)
 
     raise ConnectorError(
-        f"'{provider}' no es un conector MCP: usá owner-token / API directa (Sheets, Gmail, etc.)."
+        f"'{provider}' no tiene un MCP server local ni hosted/self-hosted configurado en el catálogo."
     )

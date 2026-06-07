@@ -57,12 +57,20 @@ export interface AttachmentMeta {
   size: number;
 }
 
+export interface DeployMarker {
+  kind: "deploy";
+  url?: string | null;
+  sha?: string | null;
+  label?: string;
+}
+
 export interface ChatMessage {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   text: string;
   thinking: string;
   tools: ToolCall[];
+  marker?: DeployMarker; // hito en la conversación (p. ej. un deploy), se renderiza como pill
   attachments?: AttachmentMeta[];
   usage?: {
     input_tokens: number;
@@ -142,9 +150,10 @@ export interface AppProject {
   integrations?: AppIntegrations;
 }
 
+// nota: el backend puede mandar role "system" (p. ej. el marcador de deploy).
 export interface MessageOut {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: unknown;
   created_at: string;
 }

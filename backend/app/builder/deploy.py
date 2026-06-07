@@ -35,7 +35,7 @@ APP_DOMAIN = os.environ.get("APP_DOMAIN", "localhost")
 # Si está seteado (prod), las apps salen por HTTPS con este certresolver de Traefik (Let's Encrypt).
 APP_CERTRESOLVER = os.environ.get("APP_CERTRESOLVER", "")
 # URL del builder alcanzable CONTENEDOR→CONTENEDOR (la pública AUTH_GATEWAY/localhost solo
-# sirve desde el navegador). El backend desplegado la usa para access + owner-token.
+# sirve desde el navegador). El backend desplegado la usa para access + connector-proxy.
 INTERNAL_GATEWAY = os.environ.get("INTERNAL_GATEWAY", "http://backend:8000")
 TRAEFIK_ENTRYPOINT = os.environ.get("TRAEFIK_ENTRYPOINT", "web")
 
@@ -134,22 +134,6 @@ async def _spa(full_path: str):
     return FileResponse(_INDEX)
 """
 
-# Backend mínimo para apps de dashboard (los datos vienen del gateway con el token del dueño).
-DASHBOARD_MAIN_PY = """\
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
-)
-
-
-@app.get("/api/health")
-async def health():
-    return {"status": "ok"}
-"""
-
 # Verificación de sesión (JWT HS256, solo stdlib) + middleware que protege /api/*.
 APP_AUTH_PY = '''\
 import base64, hashlib, hmac, json, os, time
@@ -162,6 +146,10 @@ SECRET = os.environ.get("SESSION_SECRET", "")
 GATEWAY = os.environ.get("INTERNAL_GATEWAY", "") or os.environ.get("AUTH_GATEWAY", "")
 APP_ID = os.environ.get("APP_ID", "")
 APP_SECRET = os.environ.get("APP_SECRET", "")
+# QA_MODE: solo lo setea el contenedor temporal de QA del builder (NUNCA un deploy real). Permite
+# que el harness de QA pruebe los endpoints /api con un token válido, saltando el chequeo de
+# allowlist (que requiere el gateway). No afecta producción.
+_QA_MODE = bool(os.environ.get("QA_MODE"))
 
 _access_cache = {}  # email -> (allowed: bool, ts)
 
@@ -221,7 +209,7 @@ def install_auth(app):
         user = _decode(token) if token else None
         if not user:
             return JSONResponse(status_code=401, content={"detail": "login required"})
-        if not await _has_access(user.get("email", "")):
+        if not _QA_MODE and not await _has_access(user.get("email", "")):
             return JSONResponse(status_code=403, content={"detail": "forbidden"})
         request.state.user = user
         return await call_next(request)
@@ -425,143 +413,6 @@ body { margin: 0; color: var(--c-text);
 .cashea-errbar-body { margin: 0; white-space: pre-wrap; word-break: break-word;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
   color: #7a1d16; }
-"""
-
-# Dashboard genérico (vanilla + Chart.js) dirigido por config: lee {title, headers, rows,
-# config} del gateway (con el token del dueño) y renderiza KPIs + gráficos + tabla.
-DASHBOARD_APP_JS = r"""
-window.startApp = function () {
-  var app = document.getElementById("app");
-  var charts = [];
-  var COLORS = ["#0f9d58", "#1a73e8", "#fbbc04", "#ea4335", "#9334e6", "#00acc1"];
-
-  function toNum(v) {
-    var n = parseFloat(String(v == null ? "" : v).replace(/[^0-9.\-]/g, ""));
-    return isNaN(n) ? 0 : n;
-  }
-  function agg(vals, fn) {
-    if (!vals.length) return 0;
-    if (fn === "sum") return vals.reduce(function (a, b) { return a + b; }, 0);
-    if (fn === "avg") return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length;
-    if (fn === "min") return Math.min.apply(null, vals);
-    if (fn === "max") return Math.max.apply(null, vals);
-    return vals.length;
-  }
-  function el(tag, cls, html) {
-    var e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (html != null) e.innerHTML = html;
-    return e;
-  }
-
-  function render(data) {
-    charts.forEach(function (c) { c.destroy(); });
-    charts = [];
-    app.innerHTML = "";
-    var idx = function (name) { return data.headers.indexOf(name); };
-
-    var wrap = el("div", "dash");
-    wrap.appendChild(el("h1", null, data.title || "Dashboard"));
-    wrap.appendChild(el("p", "dash-sub", data.rows.length + " filas · actualiza cada 30s"));
-
-    var kpiRow = el("div", "kpi-row");
-    (data.config.kpis || []).forEach(function (k) {
-      var i = idx(k.column);
-      var vals = i < 0 ? [] : data.rows.map(function (r) { return toNum(r[i]); });
-      var v = agg(vals, k.agg);
-      var card = el("div", "kpi");
-      card.appendChild(el("div", "kpi-label", k.label));
-      card.appendChild(el("div", "kpi-value", Number.isInteger(v) ? v : v.toFixed(2)));
-      kpiRow.appendChild(card);
-    });
-    wrap.appendChild(kpiRow);
-
-    var grid = el("div", "chart-grid");
-    (data.config.charts || []).forEach(function (c, i) {
-      var xi = idx(c.x), yi = idx(c.y), groups = {};
-      if (xi >= 0) {
-        data.rows.forEach(function (r) {
-          var key = String(r[xi] == null ? "—" : r[xi]);
-          (groups[key] = groups[key] || []).push(yi >= 0 ? toNum(r[yi]) : 1);
-        });
-      }
-      var labels = Object.keys(groups);
-      var values = labels.map(function (k) { return agg(groups[k], c.agg); });
-      var card = el("div", "card");
-      card.appendChild(el("h3", "card-title", c.title || (c.agg + "(" + c.y + ") por " + c.x)));
-      var canvas = document.createElement("canvas");
-      card.appendChild(canvas);
-      grid.appendChild(card);
-      var type = c.type === "line" ? "line" : c.type === "pie" ? "pie" : "bar";
-      charts.push(new Chart(canvas, {
-        type: type,
-        data: {
-          labels: labels,
-          datasets: [{
-            label: c.y || "",
-            data: values,
-            backgroundColor: type === "pie"
-              ? labels.map(function (_, j) { return COLORS[j % COLORS.length]; })
-              : COLORS[i % COLORS.length],
-            borderColor: COLORS[i % COLORS.length],
-          }],
-        },
-        options: { responsive: true, plugins: { legend: { display: type === "pie" } } },
-      }));
-    });
-    wrap.appendChild(grid);
-
-    var cols = (data.config.table_columns && data.config.table_columns.length)
-      ? data.config.table_columns : data.headers;
-    var tcard = el("div", "card");
-    tcard.appendChild(el("h3", "card-title", "Datos"));
-    var thead = "<tr>" + cols.map(function (h) { return "<th>" + h + "</th>"; }).join("") + "</tr>";
-    var tbody = data.rows.slice(0, 100).map(function (r) {
-      return "<tr>" + cols.map(function (h) {
-        var v = r[idx(h)]; return "<td>" + (v == null ? "" : String(v)) + "</td>";
-      }).join("") + "</tr>";
-    }).join("");
-    var tableWrap = el("div", "table-wrap");
-    tableWrap.appendChild(el("table", "data-table", "<thead>" + thead + "</thead><tbody>" + tbody + "</tbody>"));
-    tcard.appendChild(tableWrap);
-    wrap.appendChild(tcard);
-
-    app.innerHTML = "";
-    app.appendChild(wrap);
-  }
-
-  function load() {
-    window.authFetch(window.AUTH_GATEWAY + "/api/dashboards/" + window.APP_ID + "/data")
-      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-      .then(render)
-      .catch(function (e) {
-        app.innerHTML = '<div class="dash"><h2>Dashboard</h2><p style="color:#ea4335">Error: ' +
-          String(e) + "</p></div>";
-      });
-  }
-  load();
-  setInterval(load, 30000);
-};
-"""
-
-DASHBOARD_APP_CSS = """\
-.dash { padding: 28px; max-width: 1100px; margin: 0 auto; }
-.dash h1 { margin: 0 0 4px; }
-.dash-sub { color: #5f6368; margin-top: 0; }
-.kpi-row { display: flex; gap: 14px; flex-wrap: wrap; margin: 18px 0; }
-.kpi { flex: 1 1 160px; background: #fff; border: 1px solid #e8eaed; border-radius: 14px;
-  padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
-.kpi-label { font-size: 13px; color: #5f6368; font-weight: 600; }
-.kpi-value { font-size: 30px; font-weight: 800; margin-top: 6px; }
-.chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 16px; margin: 8px 0 16px; }
-.card { background: #fff; border: 1px solid #e8eaed; border-radius: 14px; padding: 18px;
-  box-shadow: 0 1px 3px rgba(0,0,0,.06); }
-.card-title { margin: 0 0 12px; font-size: 15px; }
-.table-wrap { overflow-x: auto; }
-.data-table { border-collapse: collapse; width: 100%; font-size: 13px; }
-.data-table th { text-align: left; border-bottom: 2px solid #e8eaed; padding: 8px 10px; color: #5f6368; }
-.data-table td { border-bottom: 1px solid #f1f3f4; padding: 8px 10px; }
 """
 
 
@@ -781,6 +632,81 @@ def build_and_run(
     return run_containers(slug, app_id, broker)
 
 
+# Endpoint functional probe (runs INSIDE the QA container). OpenAPI-driven + deterministic:
+# mints a valid session JWT, lists the app's real routes from /openapi.json, calls every
+# parameterless GET under /api, and flags any that return HTTP 500 (a real backend bug). Also
+# collects the app's own execution-log errors. Prints one line: QARESULT:{...json...}.
+_QA_PROBE = r'''
+import urllib.request as ur, urllib.error, json, base64, hmac, hashlib, time, os
+BASE = "http://127.0.0.1:80"
+def e64(raw): return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+sec = os.environ.get("SESSION_SECRET", "").encode()
+hd = e64('{"alg":"HS256","typ":"JWT"}'.encode())
+pl = e64(json.dumps({"email": "qa@cashea.local", "sub": "qa", "exp": int(time.time()) + 3600}).encode())
+sg = e64(hmac.new(sec, (hd + "." + pl).encode(), hashlib.sha256).digest())
+tok = hd + "." + pl + "." + sg
+def call(path, auth=True):
+    req = ur.Request(BASE + path)
+    if auth: req.add_header("Authorization", "Bearer " + tok)
+    try:
+        r = ur.urlopen(req, timeout=12); return r.getcode(), r.read(600).decode("utf-8", "ignore")
+    except urllib.error.HTTPError as ex:
+        try: body = ex.read(600).decode("utf-8", "ignore")
+        except Exception: body = ""
+        return ex.code, body
+    except Exception as ex:
+        return -1, str(ex)[:200]
+spec = None
+sc, body = call("/openapi.json", False)
+try: spec = json.loads(body)
+except Exception: spec = None
+fails = []; probed = 0
+if spec:
+    paths = spec.get("paths") or {}
+    for path in sorted(paths):
+        if probed >= 12: break
+        g = (paths[path] or {}).get("get")
+        if not g or "{" in path or not path.startswith("/api"): continue
+        if path in ("/api/health", "/api/_logs", "/api/__whoami"): continue
+        if any(p.get("required") for p in (g.get("parameters") or [])): continue
+        probed += 1
+        st, bd = call(path)
+        if st == 500 or "Traceback" in bd:
+            fails.append({"path": path, "status": st, "body": bd[:200]})
+errs = []
+sc, bd = call("/api/_logs")
+try:
+    for it in (json.loads(bd).get("logs") or []):
+        if it.get("level") == "error": errs.append(str(it.get("message", ""))[:200])
+except Exception: pass
+print("QARESULT:" + json.dumps({"probed": probed, "fails": fails, "errors": errs[-8:]}))
+'''
+
+
+def _parse_probe(output: str) -> str:
+    """Parse the QARESULT line. Returns a failure report (str) to trigger a fix, or '' if OK.
+    Best-effort: if the probe could not run, returns '' (does not fail the build)."""
+    line = next((ln for ln in output.splitlines() if ln.startswith("QARESULT:")), None)
+    if not line:
+        return ""
+    try:
+        data = json.loads(line[len("QARESULT:"):])
+    except Exception:  # noqa: BLE001
+        return ""
+    fails = data.get("fails") or []
+    if not fails:
+        return ""
+    rows = [f"- GET {f['path']} -> HTTP {f.get('status')}: {f.get('body', '')}" for f in fails]
+    errs = data.get("errors") or []
+    if errs:
+        rows.append("App execution-log errors:")
+        rows += [f"  - {e}" for e in errs]
+    return (
+        f"{len(fails)} endpoint(s) returned a server error (HTTP 500). The backend must be fixed so "
+        f"these endpoints actually work:\n" + "\n".join(rows)
+    )
+
+
 def qa_check(
     slug: str,
     app_id: str,
@@ -788,9 +714,9 @@ def qa_check(
     static_files: dict[str, str] | None = None,
     backend_reqs: str = "",
 ) -> tuple[bool, str]:
-    """QA: valida sintaxis del JS, construye la imagen (atrapa errores de build) y hace
-    smoke test del backend (corre un contenedor temporal y verifica /api/health).
-    Devuelve (ok, log_error)."""
+    """QA: validate JS syntax, build the image (catches build errors), boot the container and run
+    REAL checks — /api/health, then probe the app's actual /api endpoints (OpenAPI-driven) to catch
+    runtime 500s, plus collect the app's execution-log errors. Returns (ok, error_log)."""
     static_files = static_files or {}
     js_err = _check_js(static_files.get("static/app.js", ""))
     if js_err:
@@ -803,34 +729,51 @@ def qa_check(
         log = "".join(
             str(line.get("stream", "")) for line in exc.build_log if isinstance(line, dict)
         )
-        return False, f"ERROR DE BUILD:\n{log[-4000:]}"
+        return False, f"BUILD ERROR:\n{log[-4000:]}"
     except Exception as exc:  # noqa: BLE001
-        return False, f"ERROR DE BUILD: {exc}"
+        return False, f"BUILD ERROR: {exc}"
 
     qa_name = f"qa-{slug}"
     _remove(client, qa_name)
+    # Run with the REAL runtime env + network so the endpoint tests exercise connectors/DB for real.
+    # QA_MODE lets the harness hit /api with a valid token (skips the allowlist check, which needs
+    # the gateway). Never set on a real deploy.
     container = client.containers.run(
         image.id,
         name=qa_name,
         detach=True,
+        network=TRAEFIK_NETWORK,
         environment={
             "SESSION_SECRET": settings.session_secret,
             "AUTH_GATEWAY": settings.public_base_url,
+            "INTERNAL_GATEWAY": INTERNAL_GATEWAY,
             "APP_ID": app_id,
+            "APP_SECRET": _app_secret(app_id),
+            "QA_MODE": "1",
         },
     )
     try:
-        time.sleep(4)
+        time.sleep(5)
         container.reload()
-        logs = container.logs(tail=80).decode("utf-8", "ignore")
+        logs = container.logs(tail=120).decode("utf-8", "ignore")
         if container.status != "running":
-            return False, f"ERROR DE RUNTIME (el backend no quedó corriendo):\n{logs[-3000:]}"
+            return False, f"RUNTIME ERROR (the backend did not stay up):\n{logs[-3000:]}"
         code, out = container.exec_run(
-            "python -c \"import urllib.request as u;"
-            "print(u.urlopen('http://127.0.0.1:80/api/health').status)\""
+            ["python", "-c",
+             "import urllib.request as u;"
+             "print(u.urlopen('http://127.0.0.1:80/api/health', timeout=10).status)"]
         )
         if b"200" not in out:
-            return False, f"SMOKE TEST FALLÓ (/api/health):\n{logs[-3000:]}\n{out.decode(errors='ignore')}"
+            return False, f"SMOKE TEST FAILED (/api/health):\n{logs[-2500:]}\n{out.decode(errors='ignore')}"
+        # Functional endpoint probe (deterministic). Best-effort: probing infra issues never fail.
+        try:
+            _, probe_out = container.exec_run(["python", "-c", _QA_PROBE])
+            report = _parse_probe(probe_out.decode("utf-8", "ignore"))
+        except Exception:  # noqa: BLE001
+            report = ""
+        if report:
+            logs2 = container.logs(tail=120).decode("utf-8", "ignore")
+            return False, f"ENDPOINT TESTS FAILED:\n{report}\n\nCONTAINER LOGS (tail):\n{logs2[-2000:]}"
         return True, "ok"
     finally:
         _remove(client, qa_name)

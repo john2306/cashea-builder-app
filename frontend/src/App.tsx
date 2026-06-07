@@ -6,6 +6,7 @@ import { AppsView } from "./views/AppsView";
 import { McpView } from "./views/McpView";
 import { LogsView } from "./views/LogsView";
 import { UsersView } from "./views/UsersView";
+import { ManagerView } from "./views/ManagerView";
 import { LoginScreen } from "./views/LoginScreen";
 import { captureTokenFromUrl, currentUser } from "./lib/auth";
 
@@ -50,6 +51,7 @@ export default function App() {
         {route.view === "mcp" && <McpView />}
         {route.view === "logs" && <LogsView />}
         {route.view === "users" && <UsersView />}
+        {route.view === "manager" && <ManagerView />}
       </main>
     </div>
   );

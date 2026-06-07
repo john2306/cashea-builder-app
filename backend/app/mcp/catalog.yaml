@@ -28,11 +28,10 @@ servers:
   - key: notion
     label: Notion
     brand: "#191919"
-    transport: api          # API REST directa de Notion (api.notion.com), OAuth broker
-    auth: oauth
-    oauth:
-      provider_id: notion   # OAuth público de Notion (NOTION_CLIENT_ID/SECRET)
-    agent_hint: "crear/leer páginas y buscar en Notion"
+    transport: hosted       # MCP hosteado OFICIAL de Notion (https://mcp.notion.com/mcp)
+    auth: oauth             # OAuth DCR + PKCE auto-descubierto (sin provider_id), como Intercom/Miro
+    url: https://mcp.notion.com/mcp
+    agent_hint: "crear/leer/actualizar páginas y bases de datos y buscar en Notion (vía su MCP)"
 
   - key: intercom
     label: Intercom

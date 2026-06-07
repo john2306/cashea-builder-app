@@ -8,6 +8,7 @@ const VIEW_TO_PATH: Record<View, string> = {
   mcp: "/connectors",
   logs: "/logs",
   users: "/users",
+  manager: "/manager",
 };
 
 const PATH_TO_VIEW: Record<string, View> = {
@@ -16,6 +17,7 @@ const PATH_TO_VIEW: Record<string, View> = {
   "/connectors": "mcp",
   "/logs": "logs",
   "/users": "users",
+  "/manager": "manager",
 };
 
 const TITLES: Record<View, string> = {
@@ -24,6 +26,7 @@ const TITLES: Record<View, string> = {
   mcp: "Connectors",
   logs: "Logs",
   users: "Users",
+  manager: "Manager",
 };
 
 export interface Route {

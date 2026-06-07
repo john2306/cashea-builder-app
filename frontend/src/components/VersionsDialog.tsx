@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
-type Version = { sha: string; date: string; message: string };
+type Version = { sha: string; date: string; message: string; current?: boolean };
 
 /** Historial de versiones desplegadas (git por app) + restaurar (rollback). */
 export function VersionsDialog({
@@ -89,15 +89,15 @@ export function VersionsDialog({
           ) : versions.length === 0 ? (
             <p className="muted-note">No versions yet. They are created on each deployment.</p>
           ) : (
-            versions.map((v, i) => (
-              <div className="version-row" key={v.sha}>
+            versions.map((v) => (
+              <div className={`version-row ${v.current ? "is-current" : ""}`} key={v.sha}>
                 <div className="version-info">
                   <span className="version-msg">{v.message}</span>
                   <span className="version-meta">
                     <code>{v.sha.slice(0, 7)}</code> · {fmt(v.date)}
                   </span>
                 </div>
-                {i === 0 ? (
+                {v.current ? (
                   <span className="version-tag">deployed</span>
                 ) : (
                   <button

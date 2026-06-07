@@ -1,7 +1,7 @@
 import { viewPath } from "../router";
 import { logout, type SessionUser } from "../lib/auth";
 
-export type View = "agents" | "apps" | "mcp" | "logs" | "users";
+export type View = "agents" | "apps" | "mcp" | "logs" | "users" | "manager";
 
 function AppsIcon() {
   return (
@@ -57,6 +57,15 @@ function UsersIcon() {
   );
 }
 
+function ManagerIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3l2 2.2 3-.6.6 3L20.4 9 19 12l1.4 3-2.8 1.4-.6 3-3-.6L12 21l-2-2.2-3 .6-.6-3L3.6 15 5 12 3.6 9 6.4 7.6 7 4.6l3 .6L12 3z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
 // "Builder Agents" NO va en el nav: la vista del builder se abre desde "+ Nueva app"
 // o al editar una app. La navegación principal arranca en Apps.
 const NAV: { id: View; label: string; icon: () => JSX.Element }[] = [
@@ -65,6 +74,7 @@ const NAV: { id: View; label: string; icon: () => JSX.Element }[] = [
 ];
 // Items solo-admin (se anexan dinámicamente según la sesión).
 const ADMIN_NAV = [
+  { id: "manager" as View, label: "Manager", icon: ManagerIcon },
   { id: "users" as View, label: "Users", icon: UsersIcon },
   { id: "logs" as View, label: "Logs", icon: LogsIcon },
 ];

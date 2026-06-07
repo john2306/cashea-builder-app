@@ -3199,6 +3199,12 @@ button {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface-soft, #f4f4f6);
+  transition: background 0.15s, border-color 0.15s;
+}
+/* Versión actualmente desplegada: resaltada EN SU POSICIÓN (no se mueve al tope). */
+.version-row.is-current {
+  background: #e7f7ee;
+  border-color: #138a57;
 }
 .version-info {
   display: flex;
@@ -3918,4 +3924,257 @@ textarea.spec-input {
 .role-seg.is-saving {
   opacity: 0.55;
   pointer-events: none;
+}
+
+/* ===================== Manager (admin): Skills + Connectors ===================== */
+.btn-primary {
+  border: none;
+  background: var(--brand);
+  color: var(--on-accent);
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.btn-ghost {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.btn-ghost:hover {
+  background: rgba(29, 35, 48, 0.05);
+}
+.btn-ghost.danger {
+  color: #c0392b;
+  border-color: rgba(192, 57, 43, 0.3);
+}
+
+.mgr-tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.25rem 0 1.1rem;
+  border-bottom: 1px solid var(--border);
+}
+.mgr-tab {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 0.55rem 0.2rem;
+  margin-right: 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.mgr-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--brand);
+}
+
+.mgr-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+}
+/* `.users-count` trae margin-left:auto (lo empujaba contra el botón). Lo reseteamos:
+   contador a la IZQUIERDA, botón a la DERECHA, bien separados. */
+.mgr-toolbar .users-count {
+  margin-left: 0;
+  margin-right: auto;
+}
+.mgr-hint {
+  margin: 0 0 1rem;
+}
+
+.mgr-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.mgr-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  background: var(--surface, #fff);
+}
+.mgr-card.is-off {
+  opacity: 0.6;
+}
+.mgr-card-main {
+  min-width: 0;
+  flex: 1;
+}
+.mgr-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.25rem;
+}
+.mgr-conn-label {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.mgr-slug {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  background: rgba(29, 35, 48, 0.06);
+  padding: 0.1rem 0.4rem;
+  border-radius: 6px;
+}
+.mgr-badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 6px;
+  background: rgba(29, 35, 48, 0.08);
+  color: var(--muted);
+}
+.mgr-badge.off {
+  background: rgba(192, 57, 43, 0.12);
+  color: #c0392b;
+}
+.mgr-badge.soft {
+  background: rgba(52, 120, 246, 0.12);
+  color: #2f6fdb;
+}
+.mgr-card-desc {
+  margin: 0.1rem 0;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+.mgr-card-when {
+  margin: 0.1rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.mgr-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.mgr-switch {
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(29, 35, 48, 0.2);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.mgr-switch span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+.mgr-switch.on {
+  background: #2ecc71;
+}
+.mgr-switch.on span {
+  transform: translateX(16px);
+}
+
+.mgr-tools-toggle {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.15rem 0;
+}
+.mgr-tools {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  border-top: 1px dashed var(--border);
+  padding-top: 0.5rem;
+}
+.mgr-tool {
+  display: flex;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+}
+.mgr-tool code {
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+  min-width: 9rem;
+}
+.mgr-tool span {
+  color: var(--muted);
+}
+
+.mgr-editor {
+  max-width: 760px;
+}
+.mgr-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+.mgr-editor-head h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.mgr-editor-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+.mgr-field {
+  display: block;
+  margin-bottom: 0.9rem;
+}
+.mgr-field > span {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+.mgr-field input,
+.mgr-field textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.88rem;
+  font-family: inherit;
+  background: var(--surface, #fff);
+  color: var(--text);
+  box-sizing: border-box;
+}
+.mgr-field textarea {
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  resize: vertical;
+}
+.mgr-field input:disabled {
+  opacity: 0.6;
 }

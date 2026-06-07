@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     DateTime,
     ForeignKey,
     Identity,
@@ -94,8 +95,9 @@ class AppProject(Base):
         String(20), default="idle", server_default="idle"
     )  # idle | deploying | deployed | error
     url: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # Config de dashboard de Google Sheet (spreadsheet_id, range, kpis, charts, …).
-    dashboard: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # Sha (git) de la versión actualmente DESPLEGADA. En un restore apunta al commit restaurado
+    # (sin crear uno nuevo), para resaltar esa versión en su posición en el historial.
+    deployed_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
     # Spec de app full-stack compilada por el arquitecto (equipo de devs).
     app_spec: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     # Enterprise: lista de correos con acceso a la app desplegada (allowlist dinámica).
@@ -113,6 +115,10 @@ class AppProject(Base):
     # construida (p. ej. "cambiá el color a azul"). En el próximo deploy se aplican como
     # EDICIÓN INCREMENTAL sobre el código actual (diff mínimo) y se limpian.
     pending_edits: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Base de datos PROPIA de la app (Postgres gestionado): password (cifrado) del rol dedicado
+    # `app_<id>` en `apps-postgres`. Presencia = DB aprovisionada (schema + rol acotados). El
+    # schema/rol se derivan del id; la app la usa vía connector-proxy (postgres), nunca ve la cred.
+    db_password: Mapped[str | None] = mapped_column(Text, nullable=True)
     flow: Mapped[dict[str, Any]] = mapped_column(JSON, default=_empty_flow)
     integrations: Mapped[dict[str, Any]] = mapped_column(
         JSON, default=_empty_integrations
@@ -157,7 +163,7 @@ class Connection(Base):
 
 class McpConnection(Base):
     """Conexión OAuth a un conector, POR USUARIO (cada quien conecta sus cuentas).
-    Las apps desplegadas usan la conexión del DUEÑO (owner-token), resuelta por su user_sub."""
+    Las apps desplegadas usan la conexión del DUEÑO vía el connector-proxy, resuelta por su email."""
 
     __tablename__ = "mcp_connections"
     __table_args__ = (
@@ -224,4 +230,36 @@ class User(Base):
     )
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+
+class AgentSkill(Base):
+    """Skill (playbook) del Builder, gestionable por admins en la sección Manager.
+
+    `name` es el slug (id). Las built-in se siembran desde los .md de agent/skills/ y se pueden
+    editar/deshabilitar. El agente solo ve las `enabled`."""
+
+    __tablename__ = "agent_skills"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)  # slug kebab-case
+    description: Mapped[str] = mapped_column(Text, default="")
+    when_to_use: Mapped[str] = mapped_column(Text, default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    built_in: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ConnectorState(Base):
+    """Habilitación por la plataforma (admin) de un conector/MCP. Sin fila = habilitado (default).
+    `provider` = clave del catálogo (snake_case) o de un server local (p.ej. postgres)."""
+
+    __tablename__ = "connector_state"
+
+    provider: Mapped[str] = mapped_column(String(40), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

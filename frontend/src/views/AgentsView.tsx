@@ -9,6 +9,7 @@ import {
 import { AttachmentChip } from "../components/AttachmentChip";
 import { DeployControl } from "../components/DeployControl";
 import { DeployDialog } from "../components/DeployDialog";
+import { DeployingOverlay } from "../components/DeployingOverlay";
 import { SpecReviewDialog } from "../components/SpecReviewDialog";
 import { MessageBubble } from "../components/MessageBubble";
 import { ModelSelect } from "../components/ModelSelect";
@@ -63,7 +64,8 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export function AgentsView({ openAppId }: { openAppId?: string | null }) {
-  const { messages, connected, running, appId, send, cancel, loadConversation } = useAgentSocket();
+  const { messages, connected, running, appId, send, cancel, loadConversation, pushDeployMarker } =
+    useAgentSocket();
   const [input, setInput] = useState("");
   const [model, setModel] = useState<string>(getStoredModel);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -85,6 +87,14 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
     setSelectedApp((cur) => (cur?.id === updated.id ? { ...cur, ...updated } : cur));
     setApps((cur) => cur.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)));
   }, []);
+
+  // Refresca una app puntual (lo usa el overlay de deploy al terminar la construcción).
+  const refreshApp = useCallback(
+    (id: string) => {
+      apiJson<AppProject>(`/api/apps/${id}`).then(mergeApp).catch(() => undefined);
+    },
+    [mergeApp],
+  );
 
   const refreshApps = useCallback(async () => {
     const page = await apiJson<{ items: AppProject[] }>("/api/apps?limit=100");
@@ -220,6 +230,18 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
     return () => clearInterval(timer);
   }, [mergeApp, selectedApp?.deploy_state, selectedApp?.id]);
 
+  // Append EN VIVO del hito de deploy: al pasar deploying → deployed (misma app) agregamos el
+  // marcador al chat sin recargar. (El backend además lo persiste para futuras cargas.)
+  const prevDeployRef = useRef<{ id: string | null; state: string | null }>({ id: null, state: null });
+  useEffect(() => {
+    const cur = { id: selectedApp?.id ?? null, state: selectedApp?.deploy_state ?? null };
+    const prev = prevDeployRef.current;
+    prevDeployRef.current = cur;
+    if (prev.id === cur.id && prev.state === "deploying" && cur.state === "deployed") {
+      pushDeployMarker(selectedApp?.url, "Deployed");
+    }
+  }, [selectedApp?.id, selectedApp?.deploy_state, selectedApp?.url, pushDeployMarker]);
+
   const addFiles = async (files: FileList | File[]) => {
     setError(null);
     const list = Array.from(files);
@@ -291,6 +313,13 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
   return (
     <div className="app-shell">
       <section className="chat-panel" aria-label="Agent builder">
+        {selectedApp?.deploy_state === "deploying" && (
+          <DeployingOverlay
+            appId={selectedApp.id}
+            title={appTitle}
+            onDone={() => refreshApp(selectedApp.id)}
+          />
+        )}
         <header className="chat-header">
           <div className="chat-title">
             <p className="eyebrow">Builder Agent</p>
@@ -392,9 +421,30 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
               </div>
             </div>
           )}
-          {messages.map((m) => (
-            <MessageBubble key={m.id} message={m} />
-          ))}
+          {messages.map((m) =>
+            m.marker?.kind === "deploy" ? (
+              <div className="deploy-marker" key={m.id}>
+                <span className="deploy-marker-line" aria-hidden="true" />
+                <span className="deploy-marker-pill">
+                  <span className="deploy-marker-rocket" aria-hidden="true" />
+                  {m.marker.label || "Deployed"}
+                  {m.marker.url && (
+                    <a
+                      className="deploy-marker-link"
+                      href={m.marker.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Open
+                    </a>
+                  )}
+                </span>
+                <span className="deploy-marker-line" aria-hidden="true" />
+              </div>
+            ) : (
+              <MessageBubble key={m.id} message={m} />
+            ),
+          )}
           {running && (
             <div className="bubble-row from-assistant typing-row">
               <div className="bubble-avatar assistant-avatar" aria-hidden="true" />
@@ -422,11 +472,7 @@ export function AgentsView({ openAppId }: { openAppId?: string | null }) {
           {attachments.length > 0 && (
             <div className="chips">
               {attachments.map((a, i) => (
-                <AttachmentChip
-                  key={i}
-                  att={{ name: a.name, kind: a.kind, size: a.size }}
-                  onRemove={() => removeAttachment(i)}
-                />
+                <AttachmentChip key={i} att={a} onRemove={() => removeAttachment(i)} />
               ))}
             </div>
           )}

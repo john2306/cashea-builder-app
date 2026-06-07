@@ -107,8 +107,9 @@ async def init_db() -> None:
                 "ON mcp_connections (user_sub, provider)"
             )
         )
+        # Flujo de dashboard eliminado: limpiamos la columna legacy si quedó de versiones previas.
         await conn.execute(
-            text("ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS dashboard JSON")
+            text("ALTER TABLE app_projects DROP COLUMN IF EXISTS dashboard")
         )
         await conn.execute(
             text("ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS app_spec JSON")
@@ -154,6 +155,12 @@ async def init_db() -> None:
         )
         await conn.execute(
             text("ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS color VARCHAR(16)")
+        )
+        await conn.execute(
+            text("ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS db_password TEXT")
+        )
+        await conn.execute(
+            text("ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS deployed_sha VARCHAR(40)")
         )
         # Si el backend reinició durante un deploy, la tarea murió: reseteamos los
         # despliegues huérfanos (no pueden seguir corriendo) para no dejarlos colgados.

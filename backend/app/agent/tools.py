@@ -16,9 +16,31 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
+from .skills import get_skill_body, skill_names
+
 # --- Esquemas (lo que Claude ve) -------------------------------------------------
 
 TOOL_SCHEMAS: list[dict[str, Any]] = [
+    {
+        "name": "use_skill",
+        "description": (
+            "Carga un PLAYBOOK (skill) con instrucciones detalladas para construir cierto tipo de "
+            "app. Llamalo ANTES de `define_app` cuando el pedido del usuario encaje con una skill "
+            "disponible (ver la lista 'SKILLS' en el system prompt). Devuelve el contenido del "
+            "playbook; seguilo para armar la spec. Podés combinar skills (p. ej. crud-backoffice + "
+            "app-with-database)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Nombre de la skill a cargar (ver la lista 'SKILLS' en el system prompt).",
+                },
+            },
+            "required": ["name"],
+        },
+    },
     {
         "name": "current_datetime",
         "description": "Devuelve la fecha y hora actual del servidor en formato ISO 8601 (UTC).",
@@ -458,40 +480,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "required": ["document_id", "find", "replace"],
         },
     },
-    # --- Notion (API directa, conexión notion) -----------------------------------
-    {
-        "name": "notion_search",
-        "description": (
-            "Busca páginas y bases de datos accesibles por la integración de Notion. `only`: "
-            "'page' o 'database' para filtrar. Devuelve id, título y url (útil para obtener un "
-            "parent_id para crear páginas)."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string"},
-                "only": {"type": "string", "enum": ["page", "database"]},
-            },
-        },
-    },
-    {
-        "name": "notion_create_page",
-        "description": (
-            "Crea una página en Notion bajo un parent. `parent_id` = id de una página (o de una "
-            "base de datos si parent_type='database_id'). `content` es texto/markdown simple "
-            "(se convierte a párrafos). Devuelve la URL de la página creada."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "parent_id": {"type": "string", "description": "ID de la página/DB contenedora."},
-                "title": {"type": "string"},
-                "content": {"type": "string"},
-                "parent_type": {"type": "string", "enum": ["page_id", "database_id"]},
-            },
-            "required": ["parent_id", "title"],
-        },
-    },
+    # --- Notion: ahora vía su MCP hosteado (mcp.notion.com), no API directa.
+    #     El agente lo usa por el conector MCP (active_mcp_servers); las apps por connector-proxy.
     # --- Gmail (API directa, conexión gmail) -------------------------------------
     {
         "name": "gmail_search",
@@ -624,8 +614,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "Compila la app de backoffice descrita por el usuario en una SPEC y la guarda en "
             "la app actual. El equipo de devs (backend FastAPI async + frontend React TS + QA) "
             "la construye al Desplegar. Definí entidades (con su fuente: bigquery / "
-            "google_sheets, y location p.ej. 'proyecto.dataset.tabla'), pantallas (table/form/"
-            "dashboard/detail con sus acciones) y notificaciones. Sé concreto y completo."
+            "google_sheets / postgres, y location p.ej. 'proyecto.dataset.tabla' o el nombre de "
+            "tabla en postgres), pantallas (table/form/dashboard/detail con sus acciones) y "
+            "notificaciones. Si el usuario quiere que la app GESTIONE sus propios datos/estados/"
+            "relaciones, usá data_source 'postgres' (schema aislado por app). Sé concreto y completo."
         ),
         "input_schema": {
             "type": "object",
@@ -635,7 +627,14 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "data_sources": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Fuentes: bigquery, google_sheets, slack, gmail, notion.",
+                    "description": (
+                        "Fuentes: bigquery, google_sheets, slack, gmail, notion, postgres. "
+                        "Usá 'postgres' cuando la app necesita su PROPIA base de datos para "
+                        "gestionar su estado/datos/relaciones (CRUD persistente, entidades "
+                        "relacionadas) en vez de una hoja/servicio externo: se aprovisiona un "
+                        "SCHEMA aislado y dedicado por app. Es la opción correcta si el usuario "
+                        "pide 'una base de datos para la app', 'gestionar estados', 'relaciones', etc."
+                    ),
                 },
                 "entities": {
                     "type": "array",
@@ -679,6 +678,31 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "inspect_app_code",
+        "description": (
+            "Lee (solo-lectura) el CÓDIGO REAL ya generado de la app actual: el backend "
+            "(main.py, FastAPI), el frontend (static/app.js, static/styles.css, index.html) y "
+            "requirements.txt. Llamalo SIN `path` para ver el índice de archivos (nombres + "
+            "tamaño); llamalo CON `path` (p. ej. 'static/app.js' o 'main.py') para ver el "
+            "contenido completo de un archivo. USALO ANTES de `edit_app` cuando el cambio no sea "
+            "trivial, para ubicar exactamente qué tocar y redactar una instrucción ESPECÍFICA "
+            "(nombre de función, selector CSS, endpoint) en vez de una vaga. Solo disponible "
+            "después del primer Despliegue (antes no hay código)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "Archivo a leer completo (ej: 'main.py', 'static/app.js', "
+                        "'static/styles.css'). Omitilo para ver el índice de archivos."
+                    ),
+                },
+            },
+        },
+    },
+    {
         "name": "edit_app",
         "description": (
             "Pedí un CAMBIO INCREMENTAL sobre una app YA construida/desplegada, en lenguaje "
@@ -698,56 +722,6 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 },
             },
             "required": ["instruction"],
-        },
-    },
-    {
-        "name": "define_dashboard",
-        "description": (
-            "Diseña y guarda un DASHBOARD de una Google Sheet en la app actual (para desplegar). "
-            "Vos elegís los KPIs y gráficos según los datos. La fila 1 de la hoja son los "
-            "encabezados. Tras definirlo, el usuario lo despliega con el botón Desplegar."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "spreadsheet_id": {"type": "string"},
-                "range": {"type": "string", "description": "Hoja o rango, ej: Hoja1 (def: 1ª hoja)."},
-                "title": {"type": "string", "description": "Título del dashboard."},
-                "kpis": {
-                    "type": "array",
-                    "description": "Tarjetas KPI.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "label": {"type": "string"},
-                            "column": {"type": "string", "description": "Encabezado de columna."},
-                            "agg": {"type": "string", "enum": ["sum", "avg", "count", "min", "max"]},
-                        },
-                        "required": ["label", "column", "agg"],
-                    },
-                },
-                "charts": {
-                    "type": "array",
-                    "description": "Gráficos.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "title": {"type": "string"},
-                            "type": {"type": "string", "enum": ["bar", "line", "pie"]},
-                            "x": {"type": "string", "description": "Columna del eje X (categoría)."},
-                            "y": {"type": "string", "description": "Columna del eje Y (valor)."},
-                            "agg": {"type": "string", "enum": ["sum", "avg", "count"]},
-                        },
-                        "required": ["type", "x", "y", "agg"],
-                    },
-                },
-                "table_columns": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Columnas a mostrar en la tabla (def: todas).",
-                },
-            },
-            "required": ["spreadsheet_id", "title"],
         },
     },
 ]
@@ -1021,26 +995,7 @@ async def _doc_replace(args: dict[str, Any]) -> str:
     return f"Reemplazado «{args['find']}» por «{args['replace']}»."
 
 
-# --- Notion (API directa) --------------------------------------------------------
-
-async def _notion_search(args: dict[str, Any]) -> str:
-    from ..connectors import notion as notion_api
-
-    rows = await notion_api.search(args.get("query", ""), args.get("only", ""))
-    if not rows:
-        return "Sin resultados en Notion."
-    return "\n".join(f"- [{r['object']}] {r['title']} (id: {r['id']})" for r in rows)
-
-
-async def _notion_create_page(args: dict[str, Any]) -> str:
-    from ..connectors import notion as notion_api
-
-    p = await notion_api.create_page(
-        args["parent_id"], args["title"], args.get("content", ""),
-        args.get("parent_type", "page_id"),
-    )
-    return f"Página creada: {p.get('title')}\n{p.get('url')}"
-
+# --- Notion: vía su MCP hosteado (mcp.notion.com); sin tool de API directa. ------
 
 # --- Gmail (API directa) ---------------------------------------------------------
 
@@ -1135,9 +1090,18 @@ async def _calendar_delete_event(args: dict[str, Any]) -> str:
     return "Evento borrado."
 
 
+async def _use_skill(args: dict[str, Any]) -> str:
+    name = (args.get("name") or "").strip()
+    body = get_skill_body(name)
+    if not body:
+        return f"No existe la skill '{name}'. Disponibles: {', '.join(skill_names()) or '(ninguna)'}."
+    return f"# SKILL: {name}\n\n{body}\n\n(Seguí este playbook para diseñar la app con define_app.)"
+
+
 InlineExecutor = Callable[[dict[str, Any]], Awaitable[str]]
 
 INLINE_EXECUTORS: dict[str, InlineExecutor] = {
+    "use_skill": _use_skill,
     "current_datetime": _current_datetime,
     "fetch_url": _fetch_url,
     "list_datasets": _list_datasets,
@@ -1168,8 +1132,6 @@ INLINE_EXECUTORS: dict[str, InlineExecutor] = {
     "doc_read": _doc_read,
     "doc_append": _doc_append,
     "doc_replace": _doc_replace,
-    "notion_search": _notion_search,
-    "notion_create_page": _notion_create_page,
     "gmail_search": _gmail_search,
     "gmail_read": _gmail_read,
     "gmail_send": _gmail_send,
@@ -1180,3 +1142,26 @@ INLINE_EXECUTORS: dict[str, InlineExecutor] = {
     "calendar_update_event": _calendar_update_event,
     "calendar_delete_event": _calendar_delete_event,
 }
+
+
+# Tools BUILT-IN del agente agrupadas por conector (prefijo de nombre). Si un admin deshabilita
+# un conector en Manager, estas tools se ocultan al agente (ver runner.filter_tools_by_state).
+PROVIDER_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
+    "google_sheets": ("sheet_", "load_google_sheet"),
+    "google_drive": ("drive_",),
+    "google_docs": ("doc_",),
+    "gmail": ("gmail_",),
+    "google_calendar": ("calendar_",),
+}
+
+
+def filter_tools_by_state(schemas: list[dict[str, Any]], disabled: set[str]) -> list[dict[str, Any]]:
+    """Quita del set de tools las que pertenecen a conectores deshabilitados (por prefijo)."""
+    if not disabled:
+        return schemas
+    blocked: tuple[str, ...] = tuple(
+        p for prov in disabled for p in PROVIDER_TOOL_PREFIXES.get(prov, ())
+    )
+    if not blocked:
+        return schemas
+    return [t for t in schemas if not t["name"].startswith(blocked)]

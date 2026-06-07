@@ -27,7 +27,8 @@ from ..core.models import AppProject
 from ..mcp.registry import MCP_BETA, active_mcp_servers
 from ..mcp.bridge import bridged_tools
 from .prompts import SYSTEM_PROMPT
-from .tools import INLINE_EXECUTORS, LONG_RUNNING_TOOLS, TOOL_SCHEMAS
+from .skills import skills_index
+from .tools import INLINE_EXECUTORS, LONG_RUNNING_TOOLS, TOOL_SCHEMAS, filter_tools_by_state
 
 Emit = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -52,14 +53,16 @@ async def aclose() -> None:
         await _client.close()
         _client = None
 
-# El system prompt se manda como bloque con cache_control: cachea tools + system juntos.
-SYSTEM_BLOCKS = [
-    {
+# El system prompt + el índice de SKILLS van en el bloque cacheado. El índice se lee del snapshot
+# en memoria (estable entre ediciones admin) → el texto es idéntico turno a turno = cache hits;
+# solo cambia (1 miss) cuando un admin edita/activa una skill y se refresca el snapshot.
+def _cached_system_block() -> dict[str, Any]:
+    idx = skills_index()
+    return {
         "type": "text",
-        "text": SYSTEM_PROMPT,
+        "text": SYSTEM_PROMPT + (f"\n\n{idx}" if idx else ""),
         "cache_control": {"type": "ephemeral"},
     }
-]
 
 
 async def _capabilities_context() -> str:
@@ -234,11 +237,17 @@ def _merge_consecutive(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     out: list[dict[str, Any]] = []
     for m in messages:
+        # Marcadores de UI (p. ej. el hito de deploy, role="system" con content dict) NO son turnos
+        # de conversación: no van al historial del modelo (y romperían el armado de bloques).
+        if m.get("role") not in ("user", "assistant"):
+            continue
         content = m["content"]
         if isinstance(content, str):
             content = [{"type": "text", "text": content}] if content.strip() else []
-        else:
+        elif isinstance(content, list):
             content = [dict(b) for b in content]
+        else:
+            continue  # content no-textual/no-lista (defensivo): se ignora
         if not content:
             continue
         if out and out[-1]["role"] == m["role"]:
@@ -351,25 +360,6 @@ def _with_cache_breakpoint(messages: list[dict[str, Any]]) -> list[dict[str, Any
     return msgs
 
 
-async def _save_dashboard(app_id: str | None, config: dict[str, Any]) -> tuple[str, bool]:
-    """Guarda la config de dashboard de Google Sheet en la app actual."""
-    if not config.get("spreadsheet_id"):
-        return "Falta spreadsheet_id en el dashboard.", True
-    if app_id:
-        async with SessionLocal() as session:
-            app_project = await session.get(AppProject, app_id)
-            if app_project is not None:
-                app_project.dashboard = config
-                await session.commit()
-    n_k = len(config.get("kpis", []))
-    n_c = len(config.get("charts", []))
-    return (
-        f"Dashboard '{config.get('title', 'Sheet')}' guardado: {n_k} KPIs, {n_c} gráficos. "
-        "Desplegalo con el botón Desplegar.",
-        False,
-    )
-
-
 # Fuentes que REQUIEREN un location real (id/ruta) para funcionar en runtime.
 _NEEDS_LOCATION = {"google_sheets", "bigquery"}
 # Tokens típicos de placeholder / id inventado (case-insensitive). Los ids reales no los traen.
@@ -451,6 +441,72 @@ async def _save_pending_edit(app_id: str | None, tool_input: dict[str, Any]) -> 
         "si es solo visual, será un refresh instantáneo).",
         False,
     )
+
+
+# Tope de caracteres al devolver un archivo completo (evita inflar el contexto / la caché).
+_INSPECT_FILE_CAP = 24000
+
+
+def _code_outline(artifacts: dict[str, Any]) -> str:
+    """Mapa liviano del código actual: archivos + tamaño (líneas/caracteres). Barato."""
+    lines: list[str] = ["Archivos del código ACTUAL de la app (usá `path` para ver uno completo):"]
+    main_py = artifacts.get("main_py") or ""
+    if main_py:
+        lines.append(f"- main.py — backend FastAPI ({main_py.count(chr(10)) + 1} líneas, {len(main_py)} chars)")
+    static = artifacts.get("static_files") or {}
+    for path in sorted(static):
+        body = static.get(path) or ""
+        lines.append(f"- {path} ({body.count(chr(10)) + 1} líneas, {len(body)} chars)")
+    reqs = (artifacts.get("backend_reqs") or "").strip()
+    if reqs:
+        lines.append(f"- requirements.txt ({len(reqs.splitlines())} deps)")
+    return "\n".join(lines)
+
+
+def _read_code_file(artifacts: dict[str, Any], path: str) -> str:
+    """Devuelve el contenido de un archivo del build (main.py / static/... / requirements.txt)."""
+    p = path.strip().lstrip("/")
+    static = artifacts.get("static_files") or {}
+    if p in ("main.py", "main"):
+        body = artifacts.get("main_py") or ""
+    elif p in ("requirements.txt", "requirements", "backend_reqs"):
+        body = artifacts.get("backend_reqs") or ""
+    elif p in static:
+        body = static.get(p) or ""
+    elif f"static/{p}" in static:  # tolerar 'app.js' sin el prefijo static/
+        body = static.get(f"static/{p}") or ""
+    else:
+        avail = ", ".join(["main.py", *sorted(static), "requirements.txt"])
+        return f"No existe el archivo '{path}'. Disponibles: {avail}."
+    if not body:
+        return f"'{path}' está vacío."
+    header = f"# === {p} ({body.count(chr(10)) + 1} líneas) ===\n"
+    if len(body) > _INSPECT_FILE_CAP:
+        return header + body[:_INSPECT_FILE_CAP] + f"\n\n… (truncado, {len(body)} chars en total)"
+    return header + body
+
+
+async def _inspect_app_code(app_id: str | None, tool_input: dict[str, Any]) -> tuple[str, bool]:
+    """Lee de solo-lectura el código YA generado de la app (de build_artifacts) para que el
+    agente entienda la implementación real ANTES de pedir un cambio con edit_app. Sin `path`
+    devuelve el índice de archivos; con `path` devuelve el contenido del archivo."""
+    if not app_id:
+        return "No hay una app activa para inspeccionar.", True
+    async with SessionLocal() as session:
+        app_project = await session.get(AppProject, app_id)
+        if app_project is None:
+            return "No encontré la app.", True
+        artifacts = app_project.build_artifacts
+    if not isinstance(artifacts, dict) or not (artifacts.get("main_py") or artifacts.get("static_files")):
+        return (
+            "La app todavía no tiene código generado (aún no se desplegó). Definíla con define_app "
+            "y Desplegá primero; después podrás inspeccionar el código.",
+            True,
+        )
+    path = (tool_input.get("path") or "").strip()
+    if path:
+        return _read_code_file(artifacts, path), False
+    return _code_outline(artifacts), False
 
 
 async def _execute_inline_tool(name: str, tool_input: dict[str, Any]) -> tuple[str, bool]:
@@ -576,13 +632,18 @@ async def run_agent(
 
     # Bloque de system con el estado vivo de conexiones (sin cache_control: va después del
     # breakpoint, no invalida el prefijo cacheado).
-    system_blocks = SYSTEM_BLOCKS + [{"type": "text", "text": await _capabilities_context()}]
+    system_blocks = [_cached_system_block(), {"type": "text", "text": await _capabilities_context()}]
 
     # Conecta los servidores MCP activos (p. ej. Notion) al agente.
     # Cada mcp_server DEBE referenciarse con un mcp_toolset en tools, o la API da 400.
     # Mandamos `tools` por extra_body para no chocar con la validación de tipos del SDK.
     mcp = await active_mcp_servers()
-    tools_list: list[dict[str, Any]] = list(TOOL_SCHEMAS)
+    # Oculta las tools built-in de conectores DESHABILITADOS por el admin (Manager).
+    from ..mcp import state as connector_state
+
+    tools_list: list[dict[str, Any]] = filter_tools_by_state(
+        list(TOOL_SCHEMAS), connector_state.disabled_providers()
+    )
     extra_body: dict[str, Any] = dict(MODEL_EXTRA_BODY)
     extra_headers = None
     if mcp:
@@ -756,11 +817,7 @@ async def run_agent(
                 }
             )
 
-            if block.name == "define_dashboard":
-                content, is_error = await _save_dashboard(app_id, block.input)
-                if not is_error:
-                    await emit({"type": "dashboard", "config": block.input})
-            elif block.name == "define_app":
+            if block.name == "define_app":
                 content, is_error = await _save_app_spec(app_id, block.input)
                 if not is_error:
                     await emit({"type": "app_spec", "spec": block.input})
@@ -775,6 +832,8 @@ async def run_agent(
                         "app.edit", user_email, app_id,
                         f"Cambio solicitado: {block.input.get('instruction', '')}"[:300],
                     )
+            elif block.name == "inspect_app_code":
+                content, is_error = await _inspect_app_code(app_id, block.input)
             elif block.name in LONG_RUNNING_TOOLS:
                 content, is_error = await _execute_long_tool(
                     block.name, block.input, block.id, emit

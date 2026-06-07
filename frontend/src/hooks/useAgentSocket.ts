@@ -249,6 +249,22 @@ export function useAgentSocket() {
     [closeStream, openStream],
   );
 
+  // Hito de deploy en vivo: lo agrega AgentsView cuando un deploy termina OK (sin recargar).
+  // El backend además lo persiste como mensaje "system", así que al recargar también aparece.
+  const pushDeployMarker = useCallback((url?: string | null, label = "Deployed") => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: nextId(),
+        role: "system",
+        text: "",
+        thinking: "",
+        tools: [],
+        marker: { kind: "deploy", url: url ?? null, sha: null, label },
+      },
+    ]);
+  }, []);
+
   return {
     messages,
     connected,
@@ -258,5 +274,6 @@ export function useAgentSocket() {
     send,
     cancel,
     loadConversation,
+    pushDeployMarker,
   };
 }

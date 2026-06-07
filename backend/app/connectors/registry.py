@@ -25,8 +25,8 @@ class Provider:
     extra_auth_params: dict[str, str] = field(default_factory=dict)
     scope_separator: str = " "
     user_scopes: list[str] = field(default_factory=list)  # Slack: user token (por persona)
-    token_auth: str = "body"  # "body" | "basic" (Notion usa Basic)
-    token_body: str = "form"  # "form" | "json" (Notion espera JSON)
+    token_auth: str = "body"  # "body" | "basic" (HTTP Basic con client_id:secret)
+    token_body: str = "form"  # "form" | "json"
 
 
 _GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -131,13 +131,8 @@ PROVIDERS: dict[str, Provider] = {
             ["google calendar", "calendario", "calendar", "agenda", "eventos"],
             _GOOGLE_EXTRA,
         ),
-        Provider(
-            "notion", "Notion",
-            "https://api.notion.com/v1/oauth/authorize",
-            "https://api.notion.com/v1/oauth/token",
-            [], "NOTION_CLIENT_ID", "NOTION_CLIENT_SECRET",
-            ["notion"], {"owner": "user"}, token_auth="basic", token_body="json",
-        ),
+        # Notion ya no usa este broker: pasó a su MCP hosteado (mcp.notion.com), que se conecta
+        # por OAuth DCR + PKCE auto-descubierto (igual que Intercom) — ver mcp/catalog.yaml.
         Provider(
             "slack", "Slack",
             "https://slack.com/oauth/v2/authorize",

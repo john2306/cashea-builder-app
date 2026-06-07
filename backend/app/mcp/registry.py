@@ -54,10 +54,14 @@ async def active_mcp_servers() -> list[dict[str, str]]:
             )
         ).scalars().all()
         now = datetime.now(timezone.utc)
+        from . import state as connector_state
+
         for row in rows:
             spec = hosted.get(row.provider)
             if spec is None:
                 continue  # no es hosted -> no va al conector del agente
+            if not connector_state.is_enabled(row.provider):
+                continue  # deshabilitado por el admin (Manager)
             token = decrypt(row.access_token)
             if row.expires_at and row.expires_at <= now:
                 # Token expirado: refresca; si falla, OMITE el server (no rompe el chat).

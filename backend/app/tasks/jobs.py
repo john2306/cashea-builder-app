@@ -55,17 +55,21 @@ def run_batch_job(self, tool_input: dict[str, Any], channel: str) -> str:
 
 @celery_app.task(name="deploy.run")
 def run_deploy_task(
-    app_id: str, slug: str, force_full: bool = False, user_email: str = ""
+    app_id: str, slug: str, force_full: bool = False, user_email: str = "",
+    restore_sha: str = "",
 ) -> str:
-    """Ejecuta el pipeline de deploy (FastAPI+QA / dashboard / codegen) en el worker.
+    """Ejecuta el pipeline de deploy (generación desde spec + QA) en el worker.
 
     Corre la lógica async en un loop propio. Aislado de la API: no la bloquea ni muere
     si la API reinicia. `force_full`: ignora cache/incremental y regenera de cero.
     `user_email`: para la bitácora (el worker no tiene la sesión del request).
+    `restore_sha`: rollback a esa versión (no crea commit nuevo; marca esa como desplegada).
     """
     import asyncio
 
     from ..builder.deploy_runner import run_deploy
 
-    asyncio.run(run_deploy(app_id, slug, force_full=force_full, user_email=user_email))
+    asyncio.run(run_deploy(
+        app_id, slug, force_full=force_full, user_email=user_email, restore_sha=restore_sha,
+    ))
     return "ok"

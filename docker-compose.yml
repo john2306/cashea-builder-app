@@ -15,6 +15,22 @@ services:
       timeout: 3s
       retries: 5
 
+  # Postgres SEPARADO para las bases de datos POR APP (un schema + un rol acotado por app).
+  # Aislado de la DB de la plataforma (`postgres`): si una app abusa, no toca la plataforma.
+  apps-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: appsadmin
+      POSTGRES_PASSWORD: ${APPS_DB_PASSWORD:-apps-insecure-admin-change-me}
+      POSTGRES_DB: appsdata
+    volumes:
+      - appspgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appsadmin -d appsdata"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   redis:
     image: redis:7-alpine
     ports:
@@ -32,6 +48,8 @@ services:
       - .env  # aporta ANTHROPIC_API_KEY
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/automation
+      # Postgres de datos POR APP (rol admin que provisiona schemas/roles). DSN asyncpg puro.
+      APPS_DATABASE_ADMIN_URL: postgresql://appsadmin:${APPS_DB_PASSWORD:-apps-insecure-admin-change-me}@apps-postgres:5432/appsdata
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
@@ -56,6 +74,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      apps-postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -66,6 +86,7 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/automation
+      APPS_DATABASE_ADMIN_URL: postgresql://appsadmin:${APPS_DB_PASSWORD:-apps-insecure-admin-change-me}@apps-postgres:5432/appsdata
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
@@ -84,6 +105,8 @@ services:
       - default
       - web
     depends_on:
+      apps-postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -103,6 +126,7 @@ services:
 
 volumes:
   pgdata:
+  appspgdata:  # datos de las bases de datos POR APP (apps-postgres)
   appsdata:  # repos git locales por app (trazabilidad de cambios + rollback)
 
 networks:

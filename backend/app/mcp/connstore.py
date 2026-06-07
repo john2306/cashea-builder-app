@@ -5,7 +5,7 @@ todo el sistema: PK de `users`, `owner_email` de las apps, `shared_emails`). En 
 email por cada función, usamos un **contextvar** con el email vigente, fijado en los puntos de
 entrada:
   - Run del agente del Builder → el email del usuario que chatea.
-  - owner-token / connector-proxy / dashboards (apps desplegadas) → el email del DUEÑO de la app.
+  - connector-proxy / dashboards (apps desplegadas) → el email del DUEÑO de la app.
 
 Los conectores (`_token`) y el runtime MCP leen `current_user_email()` sin cambiar firmas.
 """
@@ -22,9 +22,33 @@ _current_user_email: contextvars.ContextVar[str | None] = contextvars.ContextVar
     "current_user_email", default=None
 )
 
+# App vigente (la app desplegada que está llamando al connector-proxy). Lo usa el conector
+# `postgres` (DB por-app) para resolver el schema/rol de ESA app. Lo fija app_connector_proxy.
+_current_app_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "current_app_id", default=None
+)
+
 
 def current_user_email() -> str | None:
     return _current_user_email.get()
+
+
+def current_app_id() -> str | None:
+    return _current_app_id.get()
+
+
+class use_app:
+    """Context manager: fija el app_id vigente dentro del bloque (para el conector postgres)."""
+
+    def __init__(self, app_id: str | None) -> None:
+        self.app_id = (app_id or "").strip() or None
+
+    def __enter__(self) -> "use_app":
+        self._token = _current_app_id.set(self.app_id)
+        return self
+
+    def __exit__(self, *exc) -> None:
+        _current_app_id.reset(self._token)
 
 
 # Alias retrocompatible (algunos módulos lo importan así); ahora devuelve el email vigente.

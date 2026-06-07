@@ -14,35 +14,10 @@ import traceback
 
 logger = logging.getLogger("cashea.deploy")
 
-from sqlalchemy import select
-
 from ..agent import runner
-from .codegen import generate_app_files
 from ..core.config import settings
 from ..core.db import SessionLocal, engine
-from .deploy import build_and_run
 from ..core.models import AppProject, Message
-
-
-def _message_text(content: object) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "\n".join(
-            b.get("text", "")
-            for b in content
-            if isinstance(b, dict) and b.get("type") == "text"
-        )
-    return ""
-
-
-def _transcript(rows: list[Message]) -> str:
-    lines = [
-        f"{m.role.upper()}: {_message_text(m.content).strip()}"
-        for m in rows
-        if _message_text(m.content).strip()
-    ]
-    return "\n\n".join(lines)[:12000]
 
 
 async def publish_deploy(app_id: str, event: dict) -> None:
@@ -58,13 +33,16 @@ async def publish_deploy(app_id: str, event: dict) -> None:
 
 
 async def run_deploy(
-    app_id: str, slug: str, force_full: bool = False, user_email: str = ""
+    app_id: str, slug: str, force_full: bool = False, user_email: str = "",
+    restore_sha: str = "",
 ) -> None:
     """Genera, construye (QA) y despliega la app. Actualiza estado y publica progreso.
 
     `force_full`: si True, ignora cache/edición incremental y regenera de cero (escotilla
     "reconstruir desde cero" para cuando el código incremental acumuló drift).
     `user_email`: para la bitácora de eventos (deploy.done / deploy.error).
+    `restore_sha`: si viene (rollback), NO se crea un commit nuevo — se marca esa versión como
+    la desplegada (`deployed_sha`), así el historial conserva su orden y se resalta en su lugar.
     """
     url, state, err = None, "error", ""
     new_artifacts: dict | None = None
@@ -80,16 +58,8 @@ async def run_deploy(
     try:
         async with SessionLocal() as session:
             app_project = await session.get(AppProject, app_id)
-            title = app_project.title if app_project else slug
             prev_artifacts = app_project.build_artifacts if app_project else None
             pending_edits = list(app_project.pending_edits or []) if app_project else []
-            rows = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.conversation_id == app_project.conversation_id)
-                    .order_by(Message.seq)
-                )
-            ).scalars().all()
 
         if app_project and app_project.app_spec:
             from .app_builder import AppSpec, generate_code, qa_and_fix
@@ -112,13 +82,39 @@ async def run_deploy(
             ).hexdigest()
             prev = prev_artifacts if isinstance(prev_artifacts, dict) else None
 
+            # DB PROPIA de la app: si la spec la pide (data_source "postgres"), aprovisiona el
+            # schema + rol acotado en apps-postgres (idempotente) y guarda el password (cifrado)
+            # la primera vez. La app la usará por el connector-proxy (provider "postgres").
+            if "postgres" in (spec_obj.data_sources or []):
+                from ..core.appdb import new_password, provision as provision_db
+                from ..core.crypto import decrypt, encrypt
+
+                try:
+                    async with SessionLocal() as s3:
+                        ap2 = await s3.get(AppProject, app_id)
+                        pw = decrypt(ap2.db_password) if (ap2 and ap2.db_password) else new_password()
+                        await provision_db(app_id, pw)
+                        if ap2 and not ap2.db_password:
+                            ap2.db_password = encrypt(pw)
+                            await s3.commit()
+                    await _stage("Base de datos de la app lista (schema propio)…")
+                except Exception as exc:  # noqa: BLE001 — no abortar el deploy por esto
+                    await _stage(f"Aviso: no se pudo aprovisionar la DB de la app: {exc}")
+
             # Decide solo: REUSE (spec igual, sin edits) / INCREMENTAL (edita el código actual
             # con diff mínimo) / FULL (genera de cero, o force_full). La edición incremental deja
             # main.py intacto si el cambio es solo-UI -> dispara el camino rápido de abajo.
-            gen = await generate_code(
-                spec_obj, on_stage=_stage, prev=prev, spec_hash=spec_hash,
-                edits=pending_edits, force_full=force_full,
-            )
+            # Contexto del DUEÑO durante la generación: permite introspectar en vivo las tools de
+            # los MCP hosted/self-hosted (BigQuery, Slack, Notion…) con SU conexión, e inyectar el
+            # catálogo real (nombres+args) en el prompt del builder. Mismo dueño que en runtime.
+            from ..mcp.connstore import use_user
+
+            owner_email = (app_project.owner_email or user_email or "").strip().lower()
+            with use_user(owner_email):
+                gen = await generate_code(
+                    spec_obj, on_stage=_stage, prev=prev, spec_hash=spec_hash,
+                    edits=pending_edits, force_full=force_full,
+                )
             new_artifacts = {
                 "spec_hash": spec_hash,
                 "main_py": gen["main_py"],
@@ -160,19 +156,11 @@ async def run_deploy(
                 if spec_obj.jobs:
                     await _stage("Programando tareas (Celery beat)…")
                     await asyncio.to_thread(run_celery_stack, slug, app_id)
-        elif app_project and app_project.dashboard:
-            from .deploy import DASHBOARD_APP_CSS, DASHBOARD_APP_JS, DASHBOARD_MAIN_PY
-
-            url = await asyncio.to_thread(
-                build_and_run, slug, app_id, DASHBOARD_MAIN_PY,
-                {"static/app.js": DASHBOARD_APP_JS, "static/app.css": DASHBOARD_APP_CSS},
-            )
         else:
-            transcript = _transcript(rows)
-            files = await generate_app_files(title, transcript)
-            url = await asyncio.to_thread(
-                build_and_run, slug, app_id, files["main_py"],
-                {"static/app.js": files["app_js"]},
+            # Único camino de generación: la app debe estar DEFINIDA (spec) por el agente.
+            raise RuntimeError(
+                "This app has no spec yet. Define it first in the builder (the agent's define_app) "
+                "before deploying."
             )
         state = "deployed"
     except Exception as exc:  # noqa: BLE001
@@ -182,6 +170,19 @@ async def run_deploy(
         # Reset del cliente Anthropic (aiohttp queda atado al loop de este asyncio.run).
         try:
             await runner.aclose()
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Sha desplegado: en deploy normal se crea un commit (git) y se usa su sha; en un RESTORE se
+    # reusa el sha restaurado (sin commit nuevo) para no alterar el orden del historial.
+    new_sha: str | None = (restore_sha or "").strip() or None
+    if state == "deployed" and not restore_sha and new_artifacts is not None and commit_spec is not None:
+        try:
+            from .app_repo import commit_version
+
+            new_sha = await asyncio.to_thread(
+                commit_version, app_id, new_artifacts, commit_spec, commit_message
+            ) or None
         except Exception:  # noqa: BLE001
             pass
 
@@ -196,17 +197,19 @@ async def run_deploy(
             if state == "deployed":
                 # Los cambios pendientes ya se aplicaron al código desplegado.
                 ap.pending_edits = []
+                if new_sha:
+                    ap.deployed_sha = new_sha  # versión actualmente live (para resaltar en el historial)
+                # Marca en el CHAT: un mensaje "system" deja constancia del deploy en ese punto.
+                if ap.conversation_id:
+                    label = (
+                        f"Restored version {restore_sha[:7]}" if restore_sha else "Deployed"
+                    )
+                    session.add(Message(
+                        conversation_id=ap.conversation_id,
+                        role="system",
+                        content={"type": "deploy", "url": url, "sha": new_sha, "label": label},
+                    ))
             await session.commit()
-    # Versionado local (git): un commit por deploy OK -> trazabilidad + rollback.
-    if state == "deployed" and new_artifacts is not None and commit_spec is not None:
-        try:
-            from .app_repo import commit_version
-
-            await asyncio.to_thread(
-                commit_version, app_id, new_artifacts, commit_spec, commit_message
-            )
-        except Exception:  # noqa: BLE001
-            pass
 
     await publish_deploy(
         app_id,

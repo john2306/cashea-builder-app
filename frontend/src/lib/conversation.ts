@@ -63,6 +63,25 @@ export function hydrateMessages(rows: MessageOut[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
 
   for (const row of rows) {
+    // Marcador de sistema (p. ej. deploy): se muestra como un hito (pill) en la conversación.
+    if (row.role === "system" && isRecord(row.content) && row.content.type === "deploy") {
+      const c = row.content;
+      messages.push({
+        id: row.id,
+        role: "system",
+        text: "",
+        thinking: "",
+        tools: [],
+        marker: {
+          kind: "deploy",
+          url: typeof c.url === "string" ? c.url : null,
+          sha: typeof c.sha === "string" ? c.sha : null,
+          label: typeof c.label === "string" ? c.label : "Deployed",
+        },
+      });
+      continue;
+    }
+
     if (row.role === "user" && applyToolResults(messages, row.content)) continue;
 
     const blocks = Array.isArray(row.content) ? row.content.filter(isRecord) : [];
