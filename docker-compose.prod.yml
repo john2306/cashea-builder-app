@@ -21,6 +21,25 @@ services:
     networks: [default]
     restart: unless-stopped
 
+  # Postgres SEPARADO para las bases de datos POR APP (un schema + un rol acotado por app).
+  # Aislado de la DB de la plataforma (`postgres`): si una app abusa, no toca la plataforma.
+  # Solo backend/worker lo tocan (red `default`); las apps llegan vía connector-proxy.
+  apps-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: appsadmin
+      POSTGRES_PASSWORD: ${APPS_DB_PASSWORD}
+      POSTGRES_DB: appsdata
+    volumes:
+      - appspgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appsadmin -d appsdata"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [default]
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     healthcheck:
@@ -37,6 +56,8 @@ services:
     env_file: [.env.prod]
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/automation
+      # Postgres de datos POR APP (rol admin que provisiona schemas/roles). DSN asyncpg puro.
+      APPS_DATABASE_ADMIN_URL: postgresql://appsadmin:${APPS_DB_PASSWORD}@apps-postgres:5432/appsdata
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
@@ -53,6 +74,7 @@ services:
     networks: [default, web]
     depends_on:
       postgres: { condition: service_healthy }
+      apps-postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
     restart: unless-stopped
 
@@ -62,6 +84,8 @@ services:
     env_file: [.env.prod]
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/automation
+      # Postgres de datos POR APP (rol admin que provisiona schemas/roles). DSN asyncpg puro.
+      APPS_DATABASE_ADMIN_URL: postgresql://appsadmin:${APPS_DB_PASSWORD}@apps-postgres:5432/appsdata
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
@@ -76,6 +100,7 @@ services:
       - appsdata:/data/apps
     networks: [default, web]
     depends_on:
+      apps-postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
     restart: unless-stopped
 
@@ -136,6 +161,7 @@ services:
 
 volumes:
   pgdata:
+  appspgdata:  # datos de las bases de datos POR APP (apps-postgres)
   appsdata:
   letsencrypt:
 
