@@ -93,7 +93,8 @@ async def run_deploy(
                     async with SessionLocal() as s3:
                         ap2 = await s3.get(AppProject, app_id)
                         pw = decrypt(ap2.db_password) if (ap2 and ap2.db_password) else new_password()
-                        await provision_db(app_id, pw)
+                        # Tope duro: si apps-postgres no responde, NUNCA colgar el deploy.
+                        await asyncio.wait_for(provision_db(app_id, pw), timeout=30)
                         if ap2 and not ap2.db_password:
                             ap2.db_password = encrypt(pw)
                             await s3.commit()

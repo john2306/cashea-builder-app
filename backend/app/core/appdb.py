@@ -62,7 +62,8 @@ async def provision(app_id: str, password: str) -> None:
         raise ValueError("password con caracteres no permitidos para DDL")
     schema = schema_name(app_id)
     role = role_name(app_id)
-    conn = await asyncpg.connect(settings.apps_database_admin_url)
+    # timeout acotado: si apps-postgres no responde, fallar rápido (NO colgar el deploy).
+    conn = await asyncpg.connect(settings.apps_database_admin_url, timeout=10)
     try:
         # Rol (idempotente): crear si no existe; fijar password + search_path siempre.
         await conn.execute(
@@ -85,7 +86,7 @@ async def deprovision(app_id: str) -> None:
     """Borra el schema (CASCADE) y el rol de la app. Best-effort, idempotente."""
     schema = schema_name(app_id)
     role = role_name(app_id)
-    conn = await asyncpg.connect(settings.apps_database_admin_url)
+    conn = await asyncpg.connect(settings.apps_database_admin_url, timeout=10)
     try:
         await conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
         # DROP OWNED limpia privilegios/objetos remanentes del rol antes de borrarlo.
