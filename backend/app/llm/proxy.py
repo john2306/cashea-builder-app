@@ -13,6 +13,8 @@ Formato de entrada (común a los 3 proveedores):
   system   = "..."  (opcional)
 
 Salida: {"text", "provider", "model", "usage": {"input_tokens", "output_tokens"}}
+  Los modelos de imagen de Gemini (Nano Banana) agregan además:
+    "images": [{"mime": "image/png", "data": "<base64>"}]  (una o más imágenes generadas/editadas)
 """
 from __future__ import annotations
 
@@ -31,11 +33,23 @@ MODELS: dict[str, str] = {
     # OpenAI
     "gpt-4o-mini": "openai",
     "gpt-4o": "openai",
-    # Google Gemini
+    # Google Gemini (texto / multimodal de entrada)
     "gemini-2.5-flash": "google",
     "gemini-2.5-pro": "google",
+    # Google Gemini — generación y edición de IMÁGENES (Nano Banana). Devuelven `images`.
+    "gemini-2.5-flash-image": "google",   # Nano Banana
+    "gemini-3.1-flash-image": "google",   # Nano Banana 2
+    "gemini-3-pro-image": "google",       # Nano Banana Pro (4K, reasoning)
 }
 DEFAULT_MODEL = "claude-haiku-4-5"
+
+# Modelos de imagen de Gemini: requieren pedir la modalidad IMAGE y devuelven la imagen en
+# las `parts` (inlineData). Se enrutan al mismo proveedor "google" pero con manejo distinto.
+GEMINI_IMAGE_MODELS: set[str] = {
+    "gemini-2.5-flash-image",
+    "gemini-3.1-flash-image",
+    "gemini-3-pro-image",
+}
 
 
 class LLMError(RuntimeError):
@@ -161,34 +175,62 @@ def _gemini_parts(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
 async def _call_gemini(model, messages, system, max_tokens, temperature) -> dict:
     if not settings.gemini_api_key:
         raise LLMError("GEMINI_API_KEY no configurada.")
+    is_image = model in GEMINI_IMAGE_MODELS
     contents = [
         {"role": "model" if m.get("role") == "assistant" else "user",
          "parts": _gemini_parts(_norm_content(m.get("content")))}
         for m in messages
     ]
-    body: dict[str, Any] = {"contents": contents, "generationConfig": {"maxOutputTokens": max_tokens}}
+    gen_cfg: dict[str, Any] = {}
     if temperature is not None:
-        body["generationConfig"]["temperature"] = temperature
-    if system:
-        body["systemInstruction"] = {"parts": [{"text": system}]}
+        gen_cfg["temperature"] = temperature
+    body: dict[str, Any] = {"contents": contents, "generationConfig": gen_cfg}
+    if is_image:
+        # Nano Banana: hay que pedir EXPLÍCITAMENTE la modalidad IMAGE (si no, no devuelve imagen).
+        # Estos modelos no usan systemInstruction: el system va como una parte de texto al inicio.
+        gen_cfg["responseModalities"] = ["TEXT", "IMAGE"]
+        if system:
+            contents.insert(0, {"role": "user", "parts": [{"text": system}]})
+    else:
+        gen_cfg["maxOutputTokens"] = max_tokens
+        if system:
+            body["systemInstruction"] = {"parts": [{"text": system}]}
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    async with httpx.AsyncClient(timeout=90.0) as c:
+    # La generación de imagen tarda más que una respuesta de texto: damos más margen.
+    async with httpx.AsyncClient(timeout=180.0 if is_image else 90.0) as c:
         r = await c.post(url, params={"key": settings.gemini_api_key}, json=body)
     if r.status_code >= 400:
         raise LLMError(f"Gemini {r.status_code}: {r.text[:300]}")
     data = r.json()
     cands = data.get("candidates", [])
     text = ""
+    images: list[dict[str, str]] = []
     if cands:
-        text = "".join(p.get("text", "") for p in cands[0].get("content", {}).get("parts", []))
+        for p in cands[0].get("content", {}).get("parts", []):
+            if p.get("text"):
+                text += p["text"]
+            # En las respuestas REST v1beta la imagen llega como inlineData (camelCase).
+            inline = p.get("inlineData") or p.get("inline_data")
+            if inline and inline.get("data"):
+                images.append({
+                    "mime": inline.get("mimeType") or inline.get("mime_type") or "image/png",
+                    "data": inline["data"],
+                })
+    if is_image and not images:
+        # Sin imagen: suele ser un bloqueo por seguridad. Mostramos el motivo si lo hay.
+        reason = (cands[0].get("finishReason") if cands else None) or "sin imagen en la respuesta"
+        raise LLMError(f"Gemini no devolvió imagen ({reason}). {text[:200]}".strip())
     um = data.get("usageMetadata", {})
-    return {
+    result: dict[str, Any] = {
         "text": text,
         "usage": {
             "input_tokens": um.get("promptTokenCount", 0),
             "output_tokens": um.get("candidatesTokenCount", 0),
         },
     }
+    if images:
+        result["images"] = images
+    return result
 
 
 _ROUTER = {"anthropic": _call_anthropic, "openai": _call_openai, "google": _call_gemini}

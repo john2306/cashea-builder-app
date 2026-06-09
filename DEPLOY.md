@@ -49,6 +49,7 @@ En `.env.prod` (mínimos imprescindibles):
 - `BUILDER_DOMAIN=izideploy.com`, `APP_DOMAIN=app.izideploy.com`, `PUBLIC_BASE_URL=https://izideploy.com`
 - `ACME_EMAIL=...`, `DO_AUTH_TOKEN=dop_v1_...`
 - `POSTGRES_PASSWORD=...` (fuerte), `SESSION_SECRET=$(openssl rand -hex 48)`, `ADMIN_EMAILS=...`
+- `APPS_DB_PASSWORD=$(openssl rand -hex 24)` (admin de `apps-postgres`, la DB de las DB POR APP)
 - `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`
 - `GOOGLE_CLIENT_ID/SECRET` (+ Notion/Slack si los usás)
 

@@ -466,16 +466,28 @@ Supported models:
 - `gemini-2.5-flash`
 - `gemini-2.5-pro`
 
+Image generation and editing (Nano Banana):
+
+- `gemini-2.5-flash-image` (Nano Banana)
+- `gemini-3.1-flash-image` (Nano Banana 2)
+- `gemini-3-pro-image` (Nano Banana Pro — 4K, higher quality)
+
 Default model:
 
 - `claude-haiku-4-5`
 
-For documents and images, message content may include parts such as:
+For documents and images as INPUT, message content may include parts such as:
 
 - `type: image`
 - `type: document`
 
 PDF processing should use models that support document input, such as Claude or Gemini models.
+
+For IMAGE GENERATION/EDITING, use a Nano Banana model: put the prompt in a text part (and, to edit,
+the source image as an `image` part). The proxy response then includes `images: [{mime, data}]` with
+the generated PNG(s) as base64, which the app renders via a `data:` URL or persists. When an app
+needs to create or edit images (logos, illustrations, product mockups, thumbnails), specify the
+Nano Banana model in the spec and describe what image is produced.
 
 In the app specification, clearly state:
 

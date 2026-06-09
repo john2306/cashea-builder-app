@@ -176,11 +176,16 @@ with the app secret):
            "system": "<optional>", "max_tokens": 1024, "temperature": 0.3}
     -> 200 {"text": "...", "provider": "...", "model": "...", "usage": {...}}
 Allowed models: claude-haiku-4-5 (default, cheap), claude-sonnet-4-6, gpt-4o-mini, gpt-4o,
-gemini-2.5-flash, gemini-2.5-pro. For DOCUMENTS/IMAGES, `content` can be a list of parts:
+gemini-2.5-flash, gemini-2.5-pro. For DOCUMENTS/IMAGES as INPUT, `content` can be a list of parts:
 {"type":"text","text":...}, {"type":"image","mime":"image/png","data":"<base64>"},
 {"type":"document","mime":"application/pdf","data":"<base64>"} (PDF only with claude-*/gemini-*).
-The proxy enforces a daily per-app cap and audits every call. If it returns 429, tell the user the
-quota was reached; if 400, the model is not allowed."""
+IMAGE GENERATION & EDITING (Nano Banana): use model "gemini-2.5-flash-image" (or
+"gemini-3.1-flash-image" / "gemini-3-pro-image" for higher quality). Put the prompt in a text part;
+to EDIT, also pass the source image as an {"type":"image",...} part. The response adds
+"images": [{"mime":"image/png","data":"<base64>"}] — render with `<img src="data:{mime};base64,{data}">`
+or persist the bytes. Do NOT set max_tokens for image models. The proxy enforces a daily per-app cap
+and audits every call. If it returns 429, tell the user the quota was reached; if 400, the model is
+not allowed."""
 
 BACKEND_SYSTEM = f"""\
 You are a SENIOR BACKEND ENGINEER. You generate the backend of a real back-office app with
