@@ -5,8 +5,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function blockText(block: Record<string, unknown>) {
+  // Solo el texto visible: el `thinking` se extrae aparte y se muestra SOLO en el bloque
+  // colapsable "Reasoning" (no debe duplicarse en el cuerpo del mensaje al recargar).
   if (block.type === "text" && typeof block.text === "string") return block.text;
-  if (block.type === "thinking" && typeof block.thinking === "string") return block.thinking;
   return "";
 }
 
@@ -88,7 +89,7 @@ export function hydrateMessages(rows: MessageOut[]): ChatMessage[] {
     const tools = row.role === "assistant" ? blocks.map(toolFromBlock).filter(isToolCall) : [];
     const thinking = blocks
       .filter((block) => block.type === "thinking")
-      .map(blockText)
+      .map((block) => (typeof block.thinking === "string" ? block.thinking : ""))
       .filter(Boolean)
       .join("\n\n");
     const text = textFromContent(row.content);
